@@ -146,6 +146,8 @@ export type Deformation =
   | 'inflated'
   | 'lattice'
   | 'flattened'
+  | 'swarm'
+  | 'plated'
 
 export const DEFORMATIONS: readonly Deformation[] = [
   'shattered',
@@ -156,6 +158,8 @@ export const DEFORMATIONS: readonly Deformation[] = [
   'inflated',
   'lattice',
   'flattened',
+  'swarm',
+  'plated',
 ]
 
 export function deform(
@@ -188,6 +192,14 @@ export function deform(
     }
     if (mutation === 'flattened') {
       flatten(part.geometry, 0.07)
+      continue
+    }
+    if (mutation === 'swarm') {
+      swarm(part.geometry, context.scale * 0.075, 3)
+      continue
+    }
+    if (mutation === 'plated') {
+      plate(part.geometry, context.scale * 0.055, 0.22)
       continue
     }
 
@@ -514,6 +526,120 @@ export function flatten(geometry: THREE.BufferGeometry, keep: number): void {
   for (let i = 0; i < points.length; i += 3) points[i] = points[i]! * keep
 
   position.needsUpdate = true
+  geometry.computeVertexNormals()
+  invalidateBounds(geometry)
+}
+
+const OCTAHEDRON: readonly (readonly [number, number, number])[] = [
+  [1, 0, 0], [0, 1, 0], [0, 0, 1],
+  [0, 1, 0], [-1, 0, 0], [0, 0, 1],
+  [-1, 0, 0], [0, -1, 0], [0, 0, 1],
+  [0, -1, 0], [1, 0, 0], [0, 0, 1],
+  [0, 1, 0], [1, 0, 0], [0, 0, -1],
+  [-1, 0, 0], [0, 1, 0], [0, 0, -1],
+  [0, -1, 0], [-1, 0, 0], [0, 0, -1],
+  [1, 0, 0], [0, -1, 0], [0, 0, -1],
+]
+
+/**
+ * Dissolves the surface into a crowd. Every few triangles leaves behind one
+ * small body where it stood, sized by a hash of the spot, so the creature is a
+ * cloud of separate things that together still has its shape.
+ */
+export function swarm(geometry: THREE.BufferGeometry, size: number, every: number): void {
+  const position = geometry.getAttribute('position') as THREE.BufferAttribute
+  const color = geometry.getAttribute('color') as THREE.BufferAttribute
+  const points = position.array as Float32Array
+  const tints = color.array as Float32Array
+
+  const positions: number[] = []
+  const colors: number[] = []
+  const step = Math.max(1, Math.round(every)) * 9
+  let taken = 0
+
+  for (let triangle = 0; triangle + 8 < points.length; triangle += step) {
+    const cx = (points[triangle]! + points[triangle + 3]! + points[triangle + 6]!) / 3
+    const cy = (points[triangle + 1]! + points[triangle + 4]! + points[triangle + 7]!) / 3
+    const cz = (points[triangle + 2]! + points[triangle + 5]! + points[triangle + 8]!) / 3
+    const radius = size * (0.5 + noise(cx, cy, cz))
+    taken++
+
+    for (const corner of OCTAHEDRON) {
+      positions.push(cx + corner[0] * radius, cy + corner[1] * radius, cz + corner[2] * radius)
+      colors.push(tints[triangle]!, tints[triangle + 1]!, tints[triangle + 2]!)
+    }
+  }
+
+  // A part too small to hold even one body still has to exist.
+  if (taken === 0) return
+
+  geometry.setAttribute('position', new THREE.BufferAttribute(new Float32Array(positions), 3))
+  geometry.setAttribute('color', new THREE.BufferAttribute(new Float32Array(colors), 3))
+  geometry.setIndex(null)
+  geometry.computeVertexNormals()
+  invalidateBounds(geometry)
+}
+
+/**
+ * Lifts every triangle off the surface and skirts it back down, so the creature
+ * is clad in overlapping plates. Unlike shattering, the plates stay joined to
+ * where they came from — it is armour rather than debris.
+ */
+export function plate(geometry: THREE.BufferGeometry, lift: number, inset: number): void {
+  const position = geometry.getAttribute('position') as THREE.BufferAttribute
+  const color = geometry.getAttribute('color') as THREE.BufferAttribute
+  const points = position.array as Float32Array
+  const tints = color.array as Float32Array
+
+  const positions: number[] = []
+  const colors: number[] = []
+
+  const corners = [new THREE.Vector3(), new THREE.Vector3(), new THREE.Vector3()]
+  const raised = [new THREE.Vector3(), new THREE.Vector3(), new THREE.Vector3()]
+  const centre = new THREE.Vector3()
+  const normal = new THREE.Vector3()
+  const edge = new THREE.Vector3()
+
+  for (let triangle = 0; triangle + 8 < points.length; triangle += 9) {
+    for (let i = 0; i < 3; i++) {
+      corners[i]!.set(points[triangle + i * 3]!, points[triangle + i * 3 + 1]!, points[triangle + i * 3 + 2]!)
+    }
+
+    normal.subVectors(corners[1]!, corners[0]!).cross(edge.subVectors(corners[2]!, corners[0]!))
+    if (normal.lengthSq() < EPSILON) continue
+    normal.normalize()
+
+    centre.addVectors(corners[0]!, corners[1]!).add(corners[2]!).divideScalar(3)
+    for (let i = 0; i < 3; i++) {
+      raised[i]!.copy(corners[i]!).lerp(centre, inset).addScaledVector(normal, lift)
+    }
+
+    const r = tints[triangle]!
+    const g = tints[triangle + 1]!
+    const b = tints[triangle + 2]!
+    const push = (vertex: THREE.Vector3) => {
+      positions.push(vertex.x, vertex.y, vertex.z)
+      colors.push(r, g, b)
+    }
+
+    push(raised[0]!)
+    push(raised[1]!)
+    push(raised[2]!)
+
+    for (let i = 0; i < 3; i++) {
+      const next = (i + 1) % 3
+      push(corners[i]!)
+      push(corners[next]!)
+      push(raised[next]!)
+      push(corners[i]!)
+      push(raised[next]!)
+      push(raised[i]!)
+    }
+  }
+
+  geometry.setAttribute('position', new THREE.BufferAttribute(new Float32Array(positions), 3))
+  geometry.setAttribute('color', new THREE.BufferAttribute(new Float32Array(colors), 3))
+  geometry.setIndex(null)
   geometry.computeVertexNormals()
   invalidateBounds(geometry)
 }

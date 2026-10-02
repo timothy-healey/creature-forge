@@ -980,3 +980,130 @@ describe('the coiled mutation', () => {
     expect(creature.joints.head!.getWorldPosition(new THREE.Vector3()).y).toBeGreaterThan(0)
   })
 })
+
+describe('the swarm mutation', () => {
+  const crowd = (edit: (spec: CreatureSpec) => void = () => {}): CreatureSpec => {
+    const spec = defaultSpec()
+    spec.body.mutation = 'swarm'
+    edit(spec)
+    return spec
+  }
+
+  test('replaces the surface with small bodies — eight triangles apiece', () => {
+    const creature = generate(crowd())
+
+    creature.root.traverse((node) => {
+      const mesh = node as THREE.Mesh
+      if (!mesh.isMesh) return
+      expect(mesh.geometry.getAttribute('position').count % 24, mesh.name).toBe(0)
+    })
+  })
+
+  test('leaves one body behind for every few triangles, not one for each', () => {
+    const surface = generate(defaultSpec()).triangleCount
+    const bodies = generate(crowd()).triangleCount / 8
+
+    expect(bodies).toBeGreaterThan(surface / 5)
+    expect(bodies).toBeLessThan(surface / 2)
+  })
+
+  test('still has the creature’s shape, held by the crowd', () => {
+    const solid = generate(defaultSpec())
+    const cloud = generate(crowd())
+    solid.root.updateMatrixWorld(true)
+    cloud.root.updateMatrixWorld(true)
+
+    const a = new THREE.Box3().setFromObject(solid.root).getSize(new THREE.Vector3())
+    const b = new THREE.Box3().setFromObject(cloud.root).getSize(new THREE.Vector3())
+
+    for (const axis of ['x', 'y', 'z'] as const) {
+      expect(Math.abs(b[axis] - a[axis]) / a[axis], axis).toBeLessThan(0.3)
+    }
+  })
+
+  test('varies the size of its bodies rather than stamping one', () => {
+    const creature = generate(crowd())
+    const spans = new Set<number>()
+
+    creature.root.traverse((node) => {
+      const mesh = node as THREE.Mesh
+      if (!mesh.isMesh || mesh.name !== 'torso') return
+      const position = mesh.geometry.getAttribute('position')
+      for (let i = 0; i < position.count; i += 24) {
+        let widest = 0
+        for (let v = i; v < i + 24; v++) widest = Math.max(widest, Math.abs(position.getX(v)))
+        spans.add(Math.round(widest * 1e4))
+      }
+    })
+
+    expect(spans.size).toBeGreaterThan(3)
+  })
+})
+
+describe('the plated mutation', () => {
+  const armoured = (edit: (spec: CreatureSpec) => void = () => {}): CreatureSpec => {
+    const spec = defaultSpec()
+    spec.body.mutation = 'plated'
+    edit(spec)
+    return spec
+  }
+
+  test('turns each triangle into a plate with a skirt — seven triangles apiece', () => {
+    const solid = generate(defaultSpec())
+    const clad = generate(armoured())
+
+    expect(clad.triangleCount).toBe(solid.triangleCount * 7)
+  })
+
+  test('stays joined to the body: it is armour, not debris', () => {
+    const solid = generate(defaultSpec())
+    const clad = generate(armoured())
+    solid.root.updateMatrixWorld(true)
+    clad.root.updateMatrixWorld(true)
+
+    const a = new THREE.Box3().setFromObject(solid.root).getSize(new THREE.Vector3())
+    const b = new THREE.Box3().setFromObject(clad.root).getSize(new THREE.Vector3())
+
+    // Only as much bigger as the plates are thick.
+    for (const axis of ['x', 'y', 'z'] as const) {
+      expect(b[axis]).toBeGreaterThanOrEqual(a[axis] - 1e-6)
+      expect(b[axis]).toBeLessThan(a[axis] * 1.3)
+    }
+  })
+
+  test('lifts the plates clear of the surface they came from', () => {
+    const creature = generate(armoured())
+    let lifted = false
+
+    creature.root.traverse((node) => {
+      const mesh = node as THREE.Mesh
+      if (!mesh.isMesh || mesh.name !== 'torso') return
+      mesh.geometry.computeBoundingBox()
+      const centre = mesh.geometry.boundingBox!.getCenter(new THREE.Vector3())
+      const position = mesh.geometry.getAttribute('position')
+
+      const radii: number[] = []
+      for (let i = 0; i < position.count; i++) {
+        const point = new THREE.Vector3().fromBufferAttribute(position, i)
+        radii.push(Math.hypot(point.x - centre.x, point.z - centre.z))
+      }
+      lifted = Math.max(...radii) - Math.min(...radii.filter((r) => r > 0.01)) > 0.02
+    })
+
+    expect(lifted).toBe(true)
+  })
+
+  test('never produces a NaN vertex, in either mesh mode', () => {
+    for (const mesh of MESH_MODES) {
+      const creature = generate(armoured((spec) => void (spec.body.mesh = mesh)))
+      creature.root.traverse((node) => {
+        const mesh3d = node as THREE.Mesh
+        if (!mesh3d.isMesh) return
+        const position = mesh3d.geometry.getAttribute('position')
+        for (let i = 0; i < position.count * 3; i++) {
+          expect(Number.isFinite(position.array[i]), mesh).toBe(true)
+        }
+      })
+    }
+  })
+})
