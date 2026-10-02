@@ -513,3 +513,64 @@ describe('the twisted mutation', () => {
     }
   })
 })
+
+describe('the exploded mutation', () => {
+  const apart = (edit: (spec: CreatureSpec) => void = () => {}): CreatureSpec => {
+    const spec = defaultSpec()
+    spec.body.mutation = 'exploded'
+    edit(spec)
+    return spec
+  }
+
+  test('keeps every triangle — nothing is destroyed, only moved', () => {
+    expect(generate(apart()).triangleCount).toBe(generate(defaultSpec()).triangleCount)
+  })
+
+  test('spreads the creature out past the body it came from', () => {
+    const whole = generate(defaultSpec())
+    const scattered = generate(apart())
+    whole.root.updateMatrixWorld(true)
+    scattered.root.updateMatrixWorld(true)
+
+    const a = new THREE.Box3().setFromObject(whole.root).getSize(new THREE.Vector3())
+    const b = new THREE.Box3().setFromObject(scattered.root).getSize(new THREE.Vector3())
+
+    expect(b.length()).toBeGreaterThan(a.length() * 1.1)
+  })
+
+  test('leaves the joints where they were, so the gait still drives it', () => {
+    const whole = generate(defaultSpec())
+    const scattered = generate(apart())
+    whole.root.updateMatrixWorld(true)
+    scattered.root.updateMatrixWorld(true)
+
+    for (const name of ['backUpperL', 'frontUpperR', 'head']) {
+      const before = whole.joints[name]!.getWorldPosition(new THREE.Vector3())
+      const after = scattered.joints[name]!.getWorldPosition(new THREE.Vector3())
+      // Only the vertical settle differs, because the spread changed the bounds.
+      expect(Math.abs(before.x - after.x), name).toBeLessThan(0.01)
+      expect(Math.abs(before.z - after.z), name).toBeLessThan(0.01)
+    }
+  })
+
+  test('actually separates the parts rather than nudging them', () => {
+    const scattered = generate(apart())
+    scattered.root.updateMatrixWorld(true)
+
+    const offsets: number[] = []
+    scattered.root.traverse((node) => {
+      if ((node as THREE.Mesh).isMesh && node.parent) offsets.push(node.parent.position.length())
+    })
+
+    expect(Math.max(...offsets)).toBeGreaterThan(0.1)
+  })
+
+  test('builds in both mesh modes and lands on the ground', () => {
+    for (const mesh of MESH_MODES) {
+      const creature = generate(apart((spec) => void (spec.body.mesh = mesh)))
+      creature.root.updateMatrixWorld(true)
+
+      expect(new THREE.Box3().setFromObject(creature.root).min.y, mesh).toBeCloseTo(0, 1)
+    }
+  })
+})

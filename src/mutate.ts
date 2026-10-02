@@ -273,3 +273,30 @@ export function twist(
   geometry.computeVertexNormals()
   invalidateBounds(geometry)
 }
+
+/**
+ * Pushes every part away from the body's centre along the line it already sits
+ * on, so the creature hangs apart in mid-air without losing its arrangement.
+ *
+ * This one moves nodes rather than vertices. The parts stay parented to their
+ * joints, so an exploded creature still walks — the gait drives the pieces, and
+ * what you see is the assembly rather than the animal.
+ */
+export function explode(parts: readonly DeformPart[], centre: THREE.Vector3, amount: number): void {
+  const here = new THREE.Vector3()
+  const turn = new THREE.Quaternion()
+  const push = new THREE.Vector3()
+
+  for (const part of parts) {
+    const parent = part.node.parent
+    if (!parent) continue
+
+    part.node.getWorldPosition(here)
+    push.subVectors(here, centre)
+    if (push.lengthSq() < 1e-8) push.set(0, 1, 0)
+    push.normalize().multiplyScalar(amount * (0.35 + push.length()))
+
+    parent.getWorldQuaternion(turn).invert()
+    part.node.position.add(push.applyQuaternion(turn))
+  }
+}

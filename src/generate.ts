@@ -2,7 +2,7 @@ import * as THREE from 'three'
 import { mirrorX, resolutionFor } from './geometry'
 import { type RestMap, type RestPose, rest } from './joints'
 import * as parts from './parts'
-import { DEFORMATIONS, deform, type DeformPart, type Deformation } from './mutate'
+import { DEFORMATIONS, deform, explode, type DeformPart, type Deformation } from './mutate'
 import { buildSkin, type SkinPiece } from './skin'
 import { type CreatureSpec, clampSpec } from './spec'
 
@@ -543,6 +543,12 @@ export function generate(input: CreatureSpec): Creature {
       scale: dims.torsoW,
       ground: Number.isFinite(standing.min.y) ? standing.min.y : 0,
     })
+  }
+
+  if (spec.body.mutation === 'exploded') {
+    root.updateMatrixWorld(true)
+    const whole = new THREE.Box3().setFromObject(root)
+    explode(deformable, whole.getCenter(new THREE.Vector3()), dims.torsoW * 0.5)
   }
 
   // ─── weld into one skin, if that is the mode ──────────────────────────────
