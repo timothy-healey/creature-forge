@@ -77,6 +77,10 @@ export function generate(input: CreatureSpec): Creature {
   // A ring of limbs has no front to lean into; a chain of them only works flat.
   const pitch = radial ? 0 : segmented ? 1.36 : coiled ? 0.3 : PITCH[spec.body.build]
   const planted = spec.body.frontLimb === 'forelegs'
+  // A part set to none still gets its joints, so a gait never has to ask
+  // whether this creature happens to have arms. Only the geometry goes.
+  const armless = spec.body.frontLimb === 'none'
+  const legless = spec.legs.type === 'none'
 
   const palette: parts.Palette = {
     body: new THREE.Color(spec.colors.body),
@@ -212,7 +216,7 @@ export function generate(input: CreatureSpec): Creature {
   }
 
   // ─── spine, pitched by build ──────────────────────────────────────────────
-  const hip = joint('hip', root, { x: 0, y: legLen, z: 0 }, rest())
+  const hip = joint('hip', root, { x: 0, y: legless ? torsoD * 0.42 : legLen, z: 0 }, rest())
   const spine = joint('spine', hip, { x: 0, y: 0, z: 0 }, rest(pitch))
 
   const beadCount = coiled ? (spec.torso.segments + 2) * 2 : spec.torso.segments + 2
@@ -257,9 +261,16 @@ export function generate(input: CreatureSpec): Creature {
     footScale?: number
     /** How many more times this limb sprouts smaller copies of itself. */
     branch?: number
+    /** Joints only, no geometry — this is how a limb is absent. */
+    bare?: boolean
   }): THREE.Object3D {
     const [upperName, lowerName, footName] = options.names
     const upper = joint(upperName, options.parent, options.at, options.pose)
+    if (options.bare) {
+      const empty = joint(lowerName, upper, { x: 0, y: -options.upperLen, z: 0 }, rest(options.bend[0]))
+      joint(footName, empty, { x: 0, y: -options.lowerLen, z: 0 }, rest(options.bend[1]))
+      return upper
+    }
     mesh(
       `${upperName}Mesh`,
       upper,
@@ -359,6 +370,7 @@ export function generate(input: CreatureSpec): Creature {
         bend: [0.62, -0.26],
         ending: 'foot',
         branch: branching,
+        bare: legless,
       })
     }
   } else if (segmented) {
@@ -385,6 +397,7 @@ export function generate(input: CreatureSpec): Creature {
           ending: 'foot',
           footScale: 0.8,
           branch: branching,
+          bare: legless,
         })
       }
     })
@@ -402,6 +415,7 @@ export function generate(input: CreatureSpec): Creature {
         bend: [digitigrade ? -1.0 : -0.08, digitigrade ? 0.48 : 0.04],
         ending: 'foot',
         branch: branching,
+        bare: legless,
       })
     }
   }
@@ -422,7 +436,10 @@ export function generate(input: CreatureSpec): Creature {
 
     root.updateMatrixWorld(true)
     const standing = new THREE.Box3()
-    for (const suffix of ['L', 'R']) standing.expandByObject(joints[`backFoot${suffix}`]!)
+    // A legless creature's ankle joints are still there but hold nothing, and
+    // they hang below where the body actually rests — so the body is the floor.
+    if (legless) standing.setFromObject(root)
+    else for (const suffix of ['L', 'R']) standing.expandByObject(joints[`backFoot${suffix}`]!)
     // With no geometry to measure — a strut creature has none yet — the ankle
     // joint itself is where the floor is.
     const ground = Number.isFinite(standing.min.y)
@@ -450,6 +467,7 @@ export function generate(input: CreatureSpec): Creature {
         ending: planted ? 'foot' : 'hand',
         footScale: 0.85,
         branch: branching,
+        bare: armless,
       })
     })
   }
@@ -463,7 +481,7 @@ export function generate(input: CreatureSpec): Creature {
   const head = joint('head', neck, { x: 0, y: dims.neckLen, z: 0 }, rest(-pitch * 0.45))
   attach(head, parts.skull(forge))
   for (const placed of parts.face(forge, spec.head.type)) attach(head, placed)
-  for (const placed of parts.eyes(forge)) attach(head, placed)
+  for (const placed of parts.eyes(forge, spec.head.eyes)) attach(head, placed)
   for (const placed of parts.horns(forge, spec.head.horns)) attach(head, placed)
 
   if (spec.head.ears !== 'none') {

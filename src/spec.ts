@@ -43,14 +43,15 @@ export type Mutation =
   | 'coiled'
   | 'swarm'
   | 'plated'
-export type FrontLimb = 'arms' | 'forelegs'
-export type HeadType = 'snout' | 'beak' | 'blunt' | 'crest'
-export type LegType = 'digitigrade' | 'plantigrade'
+export type FrontLimb = 'arms' | 'forelegs' | 'none'
+export type HeadType = 'none' | 'snout' | 'beak' | 'blunt' | 'crest'
+export type LegType = 'digitigrade' | 'plantigrade' | 'none'
 export type TailType = 'none' | 'stub' | 'long' | 'club' | 'fan'
 export type RidgeType = 'none' | 'spines' | 'plates' | 'sail'
 export type EarType = 'none' | 'pointed' | 'long' | 'frill'
 export type WingType = 'none' | 'small' | 'large'
 export type HornCount = 0 | 1 | 2
+export type EyeCount = 0 | 2 | 4 | 6
 export type SegmentCount = 2 | 3 | 4 | 5
 
 export const BUILDS: readonly Build[] = ['upright', 'hunched', 'quadruped']
@@ -89,14 +90,15 @@ export const MUTATIONS: readonly Mutation[] = [
   'swarm',
   'plated',
 ]
-export const FRONT_LIMBS: readonly FrontLimb[] = ['arms', 'forelegs']
-export const HEAD_TYPES: readonly HeadType[] = ['snout', 'beak', 'blunt', 'crest']
-export const LEG_TYPES: readonly LegType[] = ['digitigrade', 'plantigrade']
+export const FRONT_LIMBS: readonly FrontLimb[] = ['arms', 'forelegs', 'none']
+export const HEAD_TYPES: readonly HeadType[] = ['none', 'snout', 'beak', 'blunt', 'crest']
+export const LEG_TYPES: readonly LegType[] = ['digitigrade', 'plantigrade', 'none']
 export const TAIL_TYPES: readonly TailType[] = ['none', 'stub', 'long', 'club', 'fan']
 export const RIDGE_TYPES: readonly RidgeType[] = ['none', 'spines', 'plates', 'sail']
 export const EAR_TYPES: readonly EarType[] = ['none', 'pointed', 'long', 'frill']
 export const WING_TYPES: readonly WingType[] = ['none', 'small', 'large']
 export const HORN_COUNTS: readonly HornCount[] = [0, 1, 2]
+export const EYE_COUNTS: readonly EyeCount[] = [0, 2, 4, 6]
 export const SEGMENT_COUNTS: readonly SegmentCount[] = [2, 3, 4, 5]
 
 export interface CreatureSpec {
@@ -108,7 +110,7 @@ export interface CreatureSpec {
    * are what stop two creatures with different numbers being the same animal.
    */
   shape: { edge: number; section: number; bulk: number }
-  head: { type: HeadType; length: number; width: number; horns: HornCount; ears: EarType }
+  head: { type: HeadType; length: number; width: number; horns: HornCount; eyes: EyeCount; ears: EarType }
   neck: { length: number }
   torso: { height: number; width: number; depth: number; segments: SegmentCount }
   arms: { length: number; thickness: number }
@@ -174,7 +176,7 @@ export function defaultSpec(): CreatureSpec {
     body: { build: 'upright', frontLimb: 'arms', mesh: 'jointed', mutation: 'none' },
     detail: { level: 0.3 },
     shape: { edge: 0.55, section: 0.45, bulk: 0.5 },
-    head: { type: 'snout', length: 0.5, width: 0.5, horns: 1, ears: 'none' },
+    head: { type: 'snout', length: 0.5, width: 0.5, horns: 1, eyes: 2, ears: 'none' },
     neck: { length: 0.3 },
     torso: { height: 0.5, width: 0.5, depth: 0.45, segments: 3 },
     arms: { length: 0.5, thickness: 0.45 },
@@ -225,6 +227,7 @@ export function clampSpec(spec: CreatureSpec): CreatureSpec {
   out.body.mutation = oneOf(MUTATIONS, spec.body?.mutation, fallback.body.mutation)
   out.head.type = oneOf(HEAD_TYPES, spec.head?.type, fallback.head.type)
   out.head.horns = oneOf(HORN_COUNTS, spec.head?.horns, fallback.head.horns)
+  out.head.eyes = oneOf(EYE_COUNTS, spec.head?.eyes, fallback.head.eyes)
   out.head.ears = oneOf(EAR_TYPES, spec.head?.ears, fallback.head.ears)
   out.torso.segments = oneOf(SEGMENT_COUNTS, spec.torso?.segments, fallback.torso.segments)
   out.legs.type = oneOf(LEG_TYPES, spec.legs?.type, fallback.legs.type)
@@ -276,6 +279,7 @@ export function randomSpec(
       length: biased(),
       width: biased(),
       horns: pick(HORN_COUNTS),
+      eyes: pick(EYE_COUNTS),
       ears: pick(EAR_TYPES),
     },
     neck: { length: biased() },

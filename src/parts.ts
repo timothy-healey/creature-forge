@@ -195,6 +195,8 @@ export function face(forge: Forge, type: CreatureSpec['head']['type']): Placed[]
   const { dims, palette, res, shape } = forge
   const front = dims.headD * 0.3
 
+  if (type === 'none') return []
+
   if (type === 'snout') {
     return [
       {
@@ -299,21 +301,30 @@ export function face(forge: Forge, type: CreatureSpec['head']['type']): Placed[]
   ]
 }
 
-export function eyes({ dims, palette, res, shape }: Forge): Placed[] {
-  const size = Math.max(0.03, dims.headW * 0.11)
+export function eyes({ dims, palette, res, shape }: Forge, count: number): Placed[] {
+  if (count === 0) return []
+  const pairs = count / 2
+  const size = Math.max(0.025, dims.headW * (pairs > 2 ? 0.085 : 0.11))
 
-  return [-1, 1].map((side) => ({
-    name: side < 0 ? 'eyeL' : 'eyeR',
-    geometry: pointForward(
-      prism({
-        sides: res.sides(4),
-        sections: sample({ rx: taper(size, size * 0.66), rz: taper(size * 0.7, size * 0.44) }, size * 0.95, 1),
-        shape: section(shape),
-        colors: { side: palette.eye },
-      }),
-    ),
-    position: { x: side * dims.headW * 0.26, y: dims.headH * 0.58, z: dims.headD * 0.34 },
-  }))
+  return Array.from({ length: pairs }).flatMap((_, row) =>
+    [-1, 1].map((side) => ({
+      name: `eye${row}${side < 0 ? 'L' : 'R'}`,
+      geometry: pointForward(
+        prism({
+          sides: res.sides(4),
+          sections: sample({ rx: taper(size, size * 0.66), rz: taper(size * 0.7, size * 0.44) }, size * 0.95, 1),
+          shape: section(shape),
+          colors: { side: palette.eye },
+        }),
+      ),
+      // Extra pairs climb the skull and tuck inward, the way a spider's do.
+      position: {
+        x: side * dims.headW * (0.26 - row * 0.05),
+        y: dims.headH * (0.5 + row * 0.17),
+        z: dims.headD * (0.34 - row * 0.03),
+      },
+    })),
+  )
 }
 
 export function horns({ dims, palette, res, shape }: Forge, count: number): Placed[] {

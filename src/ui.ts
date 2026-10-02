@@ -7,6 +7,7 @@ import {
   FRONT_LIMBS,
   BUILDS,
   HEAD_TYPES,
+  EYE_COUNTS,
   HORN_COUNTS,
   LEG_TYPES,
   MESH_MODES,
@@ -162,6 +163,10 @@ function mountBody(panel: HTMLElement, spec: CreatureSpec, changed: () => void):
       }),
       choice('Horns', HORN_COUNTS, spec.head.horns, (horns) => {
         spec.head.horns = horns
+        changed()
+      }),
+      choice('Eyes', EYE_COUNTS, spec.head.eyes, (eyes) => {
+        spec.head.eyes = eyes
         changed()
       }),
       choice('Ears', EAR_TYPES, spec.head.ears, (ears) => {
