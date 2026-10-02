@@ -112,6 +112,12 @@ export interface CreatureSpec {
   shape: { edge: number; section: number; bulk: number }
   head: { type: HeadType; length: number; width: number; horns: HornCount; eyes: EyeCount; ears: EarType }
   neck: { length: number }
+  /**
+   * The line the body runs along. Spore's spine is a curve the player bends;
+   * ours is the same idea as two numbers, and the builds become presets of the
+   * pitch rather than three hardcoded constants.
+   */
+  spine: { arch: number; sway: number }
   torso: { height: number; width: number; depth: number; segments: SegmentCount }
   arms: { length: number; thickness: number }
   legs: { type: LegType; length: number; thickness: number }
@@ -129,6 +135,8 @@ export type SliderPath =
   | 'head.length'
   | 'head.width'
   | 'neck.length'
+  | 'spine.arch'
+  | 'spine.sway'
   | 'torso.height'
   | 'torso.width'
   | 'torso.depth'
@@ -152,6 +160,8 @@ export const SLIDERS: readonly SliderDef[] = [
   { path: 'head.length', label: 'Length', group: 'Head' },
   { path: 'head.width', label: 'Width', group: 'Head' },
   { path: 'neck.length', label: 'Length', group: 'Neck' },
+  { path: 'spine.arch', label: 'Sag → arch', group: 'Spine' },
+  { path: 'spine.sway', label: 'Sway', group: 'Spine' },
   { path: 'torso.height', label: 'Height', group: 'Torso' },
   { path: 'torso.width', label: 'Width', group: 'Torso' },
   { path: 'torso.depth', label: 'Depth', group: 'Torso' },
@@ -178,6 +188,7 @@ export function defaultSpec(): CreatureSpec {
     shape: { edge: 0.55, section: 0.45, bulk: 0.5 },
     head: { type: 'snout', length: 0.5, width: 0.5, horns: 1, eyes: 2, ears: 'none' },
     neck: { length: 0.3 },
+    spine: { arch: 0.5, sway: 0.5 },
     torso: { height: 0.5, width: 0.5, depth: 0.45, segments: 3 },
     arms: { length: 0.5, thickness: 0.45 },
     legs: { type: 'digitigrade', length: 0.5, thickness: 0.5 },
@@ -283,6 +294,7 @@ export function randomSpec(
       ears: pick(EAR_TYPES),
     },
     neck: { length: biased() },
+    spine: { arch: biased(), sway: biased() },
     torso: { height: biased(), width: biased(), depth: biased(), segments: pick(SEGMENT_COUNTS) },
     arms: { length: biased(), thickness: biased() },
     legs: { type: pick(LEG_TYPES), length: biased(), thickness: biased() },

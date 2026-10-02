@@ -75,7 +75,6 @@ export function generate(input: CreatureSpec): Creature {
   const coiled = spec.body.mutation === 'coiled'
   // A coiled body is the same chain as a segmented one, bent at every joint and
   // long enough to come round on itself — the curvature is the whole mutation.
-  const chained = segmented || coiled
   const branching = spec.body.mutation === 'recursive' ? 1 : 0
   // A ring of limbs has no front to lean into; a chain of them only works flat.
   const pitch = radial ? 0 : segmented ? 1.36 : coiled ? 0.3 : PITCH[spec.body.build]
@@ -222,28 +221,46 @@ export function generate(input: CreatureSpec): Creature {
   const hip = joint('hip', root, { x: 0, y: legless ? torsoD * 0.42 : legLen, z: 0 }, rest())
   const spine = joint('spine', hip, { x: 0, y: 0, z: 0 }, rest(pitch))
 
-  const beadCount = coiled ? (spec.torso.segments + 2) * 2 : spec.torso.segments + 2
+  /**
+   * The spine is a chain of beads whatever the creature is, so a body can bend.
+   * `segmented` pinches each bead to a waist and hangs limbs off every one;
+   * `coiled` runs twice as long and turns a full circle; everything else is the
+   * same chain with a gentle curve and no pinch, which is why those two stopped
+   * being separate code paths.
+   */
+  const beadCount = coiled
+    ? (spec.torso.segments + 2) * 2
+    : segmented
+      ? spec.torso.segments + 2
+      : Math.max(3, res.repeats(4))
   const beadLength = (dims.spineLength * (coiled ? 1.9 : 1)) / beadCount
   const chain: THREE.Object3D[] = []
 
-  if (chained) {
-    // One torso gives way to a chain of body units, each a joint of its own and
-    // each carrying its own pair of limbs. The topology is different, not the
-    // part list: nothing has been added, the body has been cut up.
-    let previous: THREE.Object3D = spine
-    for (let index = 0; index < beadCount; index++) {
-      const node = joint(
-        `body${index}`,
-        previous,
-        { x: 0, y: index === 0 ? 0 : beadLength, z: 0 },
-        coiled ? rest(-TAU / beadCount) : rest(0, (index % 2 === 0 ? 1 : -1) * 0.1),
-      )
-      attach(node, parts.segment(forge, spec.torso.segments, index, beadCount, beadLength))
-      chain.push(node)
-      previous = node
-    }
-  } else {
-    attach(spine, parts.torso(forge, spec.torso.segments))
+  // Total bend down the whole body, shared out between the beads.
+  const arch = coiled ? -TAU : (spec.spine.arch - 0.5) * 3.1
+  const sway = (spec.spine.sway - 0.5) * 2.6
+
+  let previous: THREE.Object3D = spine
+  for (let index = 0; index < beadCount; index++) {
+    const along = (index + 0.5) / beadCount
+    const node = joint(
+      `body${index}`,
+      previous,
+      { x: 0, y: index === 0 ? 0 : beadLength, z: 0 },
+      // Sway is a Z rotation, not a Y one: a bead extends along its own +Y, so
+      // turning it about Y moves nothing at all. Z is what swings it sideways.
+      rest(arch / beadCount, 0, (sway * Math.sin(along * TAU) * 2.4) / beadCount),
+    )
+    attach(node, parts.segment(forge, spec.torso.segments, index, beadCount, beadLength, segmented ? 1 : 0))
+    chain.push(node)
+    previous = node
+  }
+
+  /** Where a given fraction along the body is, as a bead and a height up it. */
+  function alongSpine(fraction: number): { node: THREE.Object3D; y: number } {
+    const clamped = Math.min(0.9999, Math.max(0, fraction))
+    const index = Math.min(beadCount - 1, Math.floor(clamped * beadCount))
+    return { node: chain[index]!, y: (clamped * beadCount - index) * beadLength }
   }
 
   // ─── limbs ────────────────────────────────────────────────────────────────
@@ -425,14 +442,15 @@ export function generate(input: CreatureSpec): Creature {
 
   // ─── front limbs, sized against the floor the hind feet stand on ──────────
   if (!radial && !segmented) {
+    const shoulderAt = alongSpine(SHOULDER_ALONG)
     const shoulderPoses = [-1, 1].map((side) =>
       planted ? rest(-pitch, 0, side * 0.06) : rest(-0.08 - pitch * 0.3, 0, side * 0.16),
     )
     const probes = [-1, 1].map((side, index) =>
       joint(
         `frontUpper${side < 0 ? 'L' : 'R'}`,
-        spine,
-        { x: side * torsoW * 0.46, y: dims.spineLength * SHOULDER_ALONG, z: 0 },
+        shoulderAt.node,
+        { x: side * torsoW * 0.46, y: shoulderAt.y, z: 0 },
         shoulderPoses[index]!,
       ),
     )
@@ -454,14 +472,14 @@ export function generate(input: CreatureSpec): Creature {
     const frontLen = planted ? Math.max(0.08, shoulderHeight - ground - footHeight) : armLen
     const frontThick = planted ? dims.legThick * 0.92 : dims.armThick
 
-    for (const probe of probes) spine.remove(probe)
+    for (const probe of probes) shoulderAt.node.remove(probe)
 
     ;[-1, 1].forEach((side, index) => {
       const suffix = side < 0 ? 'L' : 'R'
       limbChain({
         names: [`frontUpper${suffix}`, `frontLower${suffix}`, `frontFoot${suffix}`],
-        parent: spine,
-        at: { x: side * torsoW * 0.46, y: dims.spineLength * SHOULDER_ALONG, z: 0 },
+        parent: shoulderAt.node,
+        at: { x: side * torsoW * 0.46, y: shoulderAt.y, z: 0 },
         pose: shoulderPoses[index]!,
         upperLen: frontLen * 0.52,
         lowerLen: frontLen * 0.48,
@@ -476,9 +494,7 @@ export function generate(input: CreatureSpec): Creature {
   }
 
   // ─── neck and head, counter-rotated against the pitch ─────────────────────
-  const neckParent = chained ? chain[chain.length - 1]! : spine
-  const neckAt = { x: 0, y: chained ? beadLength : dims.spineLength, z: 0 }
-  const neck = joint('neck', neckParent, neckAt, rest(-pitch * 0.5))
+  const neck = joint('neck', chain[chain.length - 1]!, { x: 0, y: beadLength, z: 0 }, rest(-pitch * 0.5))
   attach(neck, parts.neck(forge))
 
   const head = joint('head', neck, { x: 0, y: dims.neckLen, z: 0 }, rest(-pitch * 0.45))
@@ -515,7 +531,8 @@ export function generate(input: CreatureSpec): Creature {
       const along = 0.12 + (i / Math.max(1, count - 1)) * 0.82
       const geometry = parts.ridgeElement(forge, spec.back.ridge, along)
       if (geometry) {
-        mesh(`ridge${i}`, spine, geometry, { x: 0, y: along * dims.spineLength, z: -profile.rz(along) * 0.82 })
+        const at = alongSpine(along)
+        mesh(`ridge${i}`, at.node, geometry, { x: 0, y: at.y, z: -profile.rz(along) * 0.82 })
       }
     }
   }
@@ -524,10 +541,11 @@ export function generate(input: CreatureSpec): Creature {
   if (spec.wings.type !== 'none') {
     for (const side of [-1, 1]) {
       // The wing sits outside the torso's own surface, swept back along the body.
+      const at = alongSpine(0.66)
       const node = joint(
         side < 0 ? 'wingL' : 'wingR',
-        spine,
-        { x: side * torsoW * 0.52 * shape.wide, y: dims.spineLength * 0.66, z: -torsoD * 0.12 },
+        at.node,
+        { x: side * torsoW * 0.52 * shape.wide, y: at.y, z: -torsoD * 0.12 },
         rest(-0.18, side * 0.93, side * 0.22),
       )
       for (const placed of parts.wing(forge, spec.wings.type)) {

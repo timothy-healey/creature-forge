@@ -20,7 +20,7 @@ function worldPoints(node: THREE.Object3D): THREE.Vector3[] {
 function torsoBox(creature: ReturnType<typeof generate>): THREE.Box3 {
   const box = new THREE.Box3()
   creature.root.traverse((child) => {
-    if (child.name === 'torso') box.expandByObject(child)
+    if (child.name.startsWith('torso')) box.expandByObject(child)
   })
   return box
 }
@@ -106,7 +106,7 @@ describe('the shape genes', () => {
       creature.root.updateMatrixWorld(true)
       const box = new THREE.Box3()
       creature.root.traverse((child) => {
-        if (child.name === 'torso') box.expandByObject(child)
+        if (child.name.startsWith('torso')) box.expandByObject(child)
       })
       const size = box.getSize(new THREE.Vector3())
       return size.x / size.z
@@ -130,7 +130,7 @@ describe('the shape genes', () => {
       let widest = 0
       let height = 0
       creature.root.traverse((child) => {
-        if (child.name !== 'torso') return
+        if (!child.name.startsWith('torso')) return
         const mesh = child as THREE.Mesh
         const position = mesh.geometry.getAttribute('position')
         for (let i = 0; i < position.count; i++) {

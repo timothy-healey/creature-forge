@@ -175,6 +175,7 @@ function mountBody(panel: HTMLElement, spec: CreatureSpec, changed: () => void):
       }),
       ...slidersFor('Head', spec, changed),
     ]),
+    section('Spine', slidersFor('Spine', spec, changed)),
     section('Neck', slidersFor('Neck', spec, changed)),
     section('Torso', slidersFor('Torso', spec, changed)),
     section('Arms', slidersFor('Arms', spec, changed)),

@@ -111,14 +111,23 @@ export function torsoProfile({ dims, shape }: Forge, segments: number): Profile 
  * One bead of a segmented body: a slice of the torso profile pinched to a waist
  * at both ends, so the chain reads as discrete units rather than a single tube.
  */
-export function segment(forge: Forge, segments: number, index: number, count: number, length: number): Placed {
+export function segment(
+  forge: Forge,
+  segments: number,
+  index: number,
+  count: number,
+  length: number,
+  waist = 1,
+): Placed {
   const { palette, res, shape } = forge
   const whole = torsoProfile(forge, segments)
-  const pinch = (t: number) => 0.74 + 0.4 * Math.sin(Math.PI * t)
+  // At zero the beads share a radius at every join, so the chain reads as one
+  // body; at one each is pinched to a waist and the body reads as segmented.
+  const pinch = (t: number) => 1 + waist * (-0.26 + 0.4 * Math.sin(Math.PI * t))
   const along = (t: number) => (index + t) / count
 
   return {
-    name: `segment${index}`,
+    name: `torso${index}`,
     geometry: prism({
       sides: res.sides(6),
       sections: sample(

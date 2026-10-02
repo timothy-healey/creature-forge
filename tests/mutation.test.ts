@@ -308,7 +308,9 @@ describe('the strut mutation', () => {
     const struts = names(creature).filter((name) => name.startsWith('strut_'))
 
     // Every joint but the root one hangs from another, so every one but that gets a strut.
-    expect(struts.length).toBeGreaterThanOrEqual(Object.keys(creature.joints).length - 2)
+    // Two joints get none: the root, and the first bead, which sits exactly on
+    // the spine it hangs from and so has no length to span.
+    expect(struts.length).toBeGreaterThanOrEqual(Object.keys(creature.joints).length - 3)
   })
 
   test('stands where the creature it replaces stood', () => {
@@ -362,9 +364,23 @@ describe('the segmented mutation', () => {
   const bodyJoints = (creature: ReturnType<typeof generate>) =>
     Object.keys(creature.joints).filter((name) => /^body\d+$/.test(name))
 
-  test('cuts the torso into a chain of joints instead of one rigid block', () => {
+  test('pinches each bead to a waist, where a plain body runs smooth', () => {
+    // Every creature's spine is a chain now. What segmented changes is that the
+    // beads are pinched apart rather than sharing a radius at each join.
+    const widths = (spec: CreatureSpec) => {
+      const out: number[] = []
+      generate(spec).root.traverse((node) => {
+        const mesh = node as THREE.Mesh
+        if (!mesh.isMesh || !mesh.name.startsWith('torso')) return
+        mesh.geometry.computeBoundingBox()
+        out.push(mesh.geometry.boundingBox!.getSize(new THREE.Vector3()).x)
+      })
+      return out
+    }
+
+    const spread = (values: number[]) => Math.max(...values) - Math.min(...values)
     expect(bodyJoints(generate(chained())).length).toBeGreaterThan(3)
-    expect(bodyJoints(generate(defaultSpec()))).toHaveLength(0)
+    expect(spread(widths(chained()))).toBeGreaterThan(spread(widths(defaultSpec())))
   })
 
   test('takes the chain’s length from the body’s segment count', () => {
@@ -721,7 +737,7 @@ describe('the inverted mutation', () => {
     creature.root.updateMatrixWorld(true)
     creature.root.traverse((node) => {
       const mesh = node as THREE.Mesh
-      if (!mesh.isMesh || mesh.name !== 'torso') return
+      if (!mesh.isMesh || !mesh.name.startsWith('torso')) return
       const position = mesh.geometry.getAttribute('position')
       const centre = new THREE.Vector3()
       mesh.geometry.computeBoundingBox()
@@ -838,7 +854,7 @@ describe('the inflated mutation', () => {
 
     creature.root.traverse((node) => {
       const mesh = node as THREE.Mesh
-      if (!mesh.isMesh || mesh.name !== 'torso') return
+      if (!mesh.isMesh || !mesh.name.startsWith('torso')) return
       const position = mesh.geometry.getAttribute('position')
       mesh.geometry.computeBoundingBox()
       const centre = mesh.geometry.boundingBox!.getCenter(new THREE.Vector3())
@@ -917,7 +933,7 @@ describe('the flattened mutation', () => {
       let width = 0
       generate(spec).root.traverse((node) => {
         const mesh = node as THREE.Mesh
-        if (!mesh.isMesh || mesh.name !== 'torso') return
+        if (!mesh.isMesh || !mesh.name.startsWith('torso')) return
         mesh.geometry.computeBoundingBox()
         width = mesh.geometry.boundingBox!.getSize(new THREE.Vector3()).x
       })
@@ -1043,7 +1059,7 @@ describe('the swarm mutation', () => {
 
     creature.root.traverse((node) => {
       const mesh = node as THREE.Mesh
-      if (!mesh.isMesh || mesh.name !== 'torso') return
+      if (!mesh.isMesh || !mesh.name.startsWith('torso')) return
       const position = mesh.geometry.getAttribute('position')
       for (let i = 0; i < position.count; i += 24) {
         let widest = 0
@@ -1090,7 +1106,7 @@ describe('the plated mutation', () => {
 
     creature.root.traverse((node) => {
       const mesh = node as THREE.Mesh
-      if (!mesh.isMesh || mesh.name !== 'torso') return
+      if (!mesh.isMesh || !mesh.name.startsWith('torso')) return
       mesh.geometry.computeBoundingBox()
       const centre = mesh.geometry.boundingBox!.getCenter(new THREE.Vector3())
       const position = mesh.geometry.getAttribute('position')
