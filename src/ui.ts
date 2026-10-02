@@ -48,6 +48,7 @@ export function mountControls(panel: HTMLElement, spec: CreatureSpec, handlers: 
     }),
     choiceGroup('Gait', GAITS, 'idle', (gait) => handlers.onGaitChange(gait)),
     section('Detail', slidersFor('Detail', spec, changed)),
+    section('Shape', slidersFor('Shape', spec, changed)),
     section('Body', [
       choiceGroup('Build', BUILDS, spec.body.build, (build) => {
         spec.body.build = build

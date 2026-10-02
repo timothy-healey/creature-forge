@@ -68,7 +68,7 @@ section:first-of-type h2 { margin-top: 10px; }
 
 .row {
   display: grid;
-  grid-template-columns: 74px 1fr;
+  grid-template-columns: 86px 1fr;
   align-items: center;
   gap: 8px;
   margin-bottom: 6px;

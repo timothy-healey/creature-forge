@@ -38,6 +38,11 @@ export interface CreatureSpec {
   body: { build: Build; frontLimb: FrontLimb }
   /** How finely the same shape is described. Slides a creature between eras. */
   detail: { level: number }
+  /**
+   * Three genes that reshape every part at once, rather than resizing it. They
+   * are what stop two creatures with different numbers being the same animal.
+   */
+  shape: { edge: number; section: number; bulk: number }
   head: { type: HeadType; length: number; width: number; horns: HornCount; ears: EarType }
   neck: { length: number }
   torso: { height: number; width: number; depth: number; segments: SegmentCount }
@@ -51,6 +56,9 @@ export interface CreatureSpec {
 
 export type SliderPath =
   | 'detail.level'
+  | 'shape.edge'
+  | 'shape.section'
+  | 'shape.bulk'
   | 'head.length'
   | 'head.width'
   | 'neck.length'
@@ -71,6 +79,9 @@ export interface SliderDef {
 /** Drives both clamping and the control panel, so the two can never disagree. */
 export const SLIDERS: readonly SliderDef[] = [
   { path: 'detail.level', label: 'Vertices', group: 'Detail' },
+  { path: 'shape.edge', label: 'Soft → sharp', group: 'Shape' },
+  { path: 'shape.section', label: 'Deep → wide', group: 'Shape' },
+  { path: 'shape.bulk', label: 'Mass fore/aft', group: 'Shape' },
   { path: 'head.length', label: 'Length', group: 'Head' },
   { path: 'head.width', label: 'Width', group: 'Head' },
   { path: 'neck.length', label: 'Length', group: 'Neck' },
@@ -97,6 +108,7 @@ export function defaultSpec(): CreatureSpec {
   return {
     body: { build: 'upright', frontLimb: 'arms' },
     detail: { level: 0.3 },
+    shape: { edge: 0.55, section: 0.45, bulk: 0.5 },
     head: { type: 'snout', length: 0.5, width: 0.5, horns: 1, ears: 'none' },
     neck: { length: 0.3 },
     torso: { height: 0.5, width: 0.5, depth: 0.45, segments: 3 },
@@ -182,6 +194,9 @@ export function randomSpec(random: () => number = Math.random, detail = defaultS
   const spec: CreatureSpec = {
     body: { build: pick(BUILDS), frontLimb: pick(FRONT_LIMBS) },
     detail: { level: spec_detail },
+    // Rolled flat, not biased: the shape genes are the anti-sameness axis, and
+    // their whole value is in the extremes a biased roll would never reach.
+    shape: { edge: random(), section: random(), bulk: random() },
     head: {
       type: pick(HEAD_TYPES),
       length: biased(),
@@ -199,7 +214,9 @@ export function randomSpec(random: () => number = Math.random, detail = defaultS
     colors: rollPalette(random),
   }
 
-  const proportions = SLIDERS.filter((slider) => slider.path !== 'detail.level')
+  const proportions = SLIDERS.filter(
+    (slider) => slider.group !== 'Detail' && slider.group !== 'Shape',
+  )
   for (let i = 0; i < 2; i++) {
     const exaggerated = pick(proportions)
     writeSlider(spec, exaggerated.path, random() < 0.5 ? random() * 0.16 : 0.84 + random() * 0.16)

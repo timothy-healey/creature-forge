@@ -1,5 +1,5 @@
 import * as THREE from 'three'
-import { resolutionFor } from './geometry'
+import { mirrorX, resolutionFor } from './geometry'
 import { type RestMap, type RestPose, rest } from './joints'
 import * as parts from './parts'
 import { type CreatureSpec, clampSpec } from './spec'
@@ -50,7 +50,7 @@ const lerp = (a: number, b: number, t: number) => a + (b - a) * t
 
 export function generate(input: CreatureSpec): Creature {
   const spec = clampSpec(input)
-  const res = resolutionFor(spec.detail.level)
+  const res = resolutionFor(spec.detail.level, spec.shape.edge)
   const pitch = PITCH[spec.body.build]
   const planted = spec.body.frontLimb === 'forelegs'
 
@@ -78,6 +78,16 @@ export function generate(input: CreatureSpec): Creature {
   dims.headH = dims.headW * 0.82
   dims.headD = dims.headW * 0.86
 
+  // The three genes, resolved. `edge` runs a faceted diamond cross-section up to
+  // a slabby one; `section` trades depth for width; `bulk` moves where the mass
+  // along every part sits. They reshape a creature rather than resizing it.
+  const shape: parts.Shape = {
+    power: lerp(2.8, 1.02, spec.shape.edge),
+    wide: lerp(0.74, 1.36, spec.shape.section),
+    deep: lerp(1.48, 0.66, spec.shape.section),
+    bulk: spec.shape.bulk,
+  }
+
   const legLen = lerp(0.28, 0.86, spec.legs.length)
   const armLen = lerp(0.24, 0.68, spec.arms.length)
   const footHeight = Math.max(0.05, dims.legThick * 0.42)
@@ -89,6 +99,7 @@ export function generate(input: CreatureSpec): Creature {
   const restMap: RestMap = {}
   const geometries: THREE.BufferGeometry[] = []
   const material = new THREE.MeshLambertMaterial({ vertexColors: true, flatShading: true })
+  const forge: parts.Forge = { dims, palette, res, shape }
 
   function joint(name: string, parent: THREE.Object3D, at: THREE.Vector3Like, pose: RestPose): THREE.Group {
     const group = new THREE.Group()
@@ -114,11 +125,28 @@ export function generate(input: CreatureSpec): Creature {
   const mesh = (name: string, parent: THREE.Object3D, geometry: THREE.BufferGeometry, at?: THREE.Vector3Like) =>
     attach(parent, { name, geometry, ...(at ? { position: at } : {}) })
 
+  /**
+   * Reflects a part for the other side of the body. Mirroring the geometry is
+   * not enough on its own: a part placed off-axis or swung by a rotation has to
+   * have that offset and that swing reflected too, or it points back across the
+   * midline and into the torso.
+   */
+  function mirrored(placed: parts.Placed): parts.Placed {
+    return {
+      ...placed,
+      geometry: mirrorX(placed.geometry),
+      ...(placed.position ? { position: { ...placed.position, x: -placed.position.x } } : {}),
+      ...(placed.rotation
+        ? { rotation: { x: placed.rotation.x, y: -placed.rotation.y, z: -placed.rotation.z } }
+        : {}),
+    }
+  }
+
   // ─── spine, pitched by build ──────────────────────────────────────────────
   const hip = joint('hip', root, { x: 0, y: legLen, z: 0 }, rest())
   const spine = joint('spine', hip, { x: 0, y: 0, z: 0 }, rest(pitch))
 
-  attach(spine, parts.torso(dims, palette, res, spec.torso.segments))
+  attach(spine, parts.torso(forge, spec.torso.segments))
 
   // ─── back legs ────────────────────────────────────────────────────────────
   const thighLen = legLen * 0.52
@@ -135,18 +163,18 @@ export function generate(input: CreatureSpec): Creature {
     mesh(
       `backThigh${suffix}`,
       upper,
-      parts.limb(palette, res, thighLen, dims.legThick * 0.58, dims.legThick * 0.64, dims.legThick * 0.44),
+      parts.limb(forge, thighLen, dims.legThick * 0.58, dims.legThick * 0.64, dims.legThick * 0.44),
     )
 
     const lower = joint(`backLower${suffix}`, upper, { x: 0, y: -thighLen, z: 0 }, rest(digitigrade ? -1.0 : -0.08))
     mesh(
       `backShin${suffix}`,
       lower,
-      parts.limb(palette, res, shinLen, dims.legThick * 0.46, dims.legThick * 0.5, dims.legThick * 0.34),
+      parts.limb(forge, shinLen, dims.legThick * 0.46, dims.legThick * 0.5, dims.legThick * 0.34),
     )
 
     const ankle = joint(`backFoot${suffix}`, lower, { x: 0, y: -shinLen, z: 0 }, rest(digitigrade ? 0.48 : 0.04))
-    mesh(`backFoot${suffix}Mesh`, ankle, parts.foot(dims, palette, res, footHeight), {
+    mesh(`backFoot${suffix}Mesh`, ankle, parts.foot(forge, footHeight), {
       x: 0,
       y: -footHeight * 0.5,
       z: -dims.legThick * 0.45,
@@ -180,40 +208,39 @@ export function generate(input: CreatureSpec): Creature {
     mesh(
       `frontUpper${suffix}Mesh`,
       shoulder,
-      parts.limb(palette, res, frontUpperLen, frontThick * 0.56, frontThick * 0.6, frontThick * 0.44),
+      parts.limb(forge, frontUpperLen, frontThick * 0.56, frontThick * 0.6, frontThick * 0.44),
     )
 
     const lower = joint(`frontLower${suffix}`, shoulder, { x: 0, y: -frontUpperLen, z: 0 }, rest(planted ? 0.12 : 0.2))
     mesh(
       `frontLower${suffix}Mesh`,
       lower,
-      parts.limb(palette, res, frontLowerLen, frontThick * 0.46, frontThick * 0.48, frontThick * 0.34),
+      parts.limb(forge, frontLowerLen, frontThick * 0.46, frontThick * 0.48, frontThick * 0.34),
     )
 
     const end = joint(`frontFoot${suffix}`, lower, { x: 0, y: -frontLowerLen, z: 0 }, rest(planted ? 0.04 : 0))
     if (planted) {
-      mesh(`frontFoot${suffix}Mesh`, end, parts.foot(dims, palette, res, footHeight * 0.85), {
+      mesh(`frontFoot${suffix}Mesh`, end, parts.foot(forge, footHeight * 0.85), {
         x: 0,
         y: -footHeight * 0.42,
         z: -dims.legThick * 0.4,
       })
     } else {
-      mesh(`hand${suffix}`, end, parts.hand(palette, res, frontThick))
+      mesh(`hand${suffix}`, end, parts.hand(forge, frontThick))
     }
   })
 
   // ─── neck and head, counter-rotated against the pitch ─────────────────────
   const neck = joint('neck', spine, { x: 0, y: dims.spineLength, z: 0 }, rest(-pitch * 0.5))
-  attach(neck, parts.neck(dims, palette, res))
+  attach(neck, parts.neck(forge))
 
   const head = joint('head', neck, { x: 0, y: dims.neckLen, z: 0 }, rest(-pitch * 0.45))
-  attach(head, parts.skull(dims, palette, res))
-  for (const placed of parts.face(dims, palette, res, spec.head.type)) attach(head, placed)
-  for (const placed of parts.eyes(dims, palette, res)) attach(head, placed)
-  for (const placed of parts.horns(dims, palette, res, spec.head.horns)) attach(head, placed)
+  attach(head, parts.skull(forge))
+  for (const placed of parts.face(forge, spec.head.type)) attach(head, placed)
+  for (const placed of parts.eyes(forge)) attach(head, placed)
+  for (const placed of parts.horns(forge, spec.head.horns)) attach(head, placed)
 
-  const earShape = parts.ear(dims, palette, res, spec.head.ears)
-  if (earShape) {
+  if (spec.head.ears !== 'none') {
     const sweeps: Record<string, readonly [number, number]> = {
       pointed: [-0.25, 0.45],
       long: [0.35, 0.8],
@@ -221,23 +248,25 @@ export function generate(input: CreatureSpec): Creature {
     }
     const sweep = sweeps[spec.head.ears] ?? ([0, 0.5] as const)
     for (const side of [-1, 1]) {
+      const shaped = parts.ear(forge, spec.head.ears)
+      if (!shaped) break
       const node = joint(
         side < 0 ? 'earL' : 'earR',
         head,
         { x: side * dims.headW * 0.3, y: dims.headH * 0.7, z: -dims.headD * 0.1 },
         rest(sweep[0], 0, side * sweep[1]),
       )
-      mesh('ear', node, side < 0 ? earShape.geometry : earShape.geometry.clone())
+      attach(node, side < 0 ? mirrored({ ...shaped, name: 'ear' }) : { ...shaped, name: 'ear' })
     }
   }
 
   // ─── back ridge, following the line of the back ───────────────────────────
   if (spec.back.ridge !== 'none') {
-    const profile = parts.torsoProfile(dims, spec.torso.segments)
+    const profile = parts.torsoProfile(forge, spec.torso.segments)
     const count = res.repeats(spec.torso.segments * 2.2)
     for (let i = 0; i < count; i++) {
       const along = 0.12 + (i / Math.max(1, count - 1)) * 0.82
-      const geometry = parts.ridgeElement(dims, palette, res, spec.back.ridge, along)
+      const geometry = parts.ridgeElement(forge, spec.back.ridge, along)
       if (geometry) {
         mesh(`ridge${i}`, spine, geometry, { x: 0, y: along * dims.spineLength, z: -profile.rz(along) * 0.82 })
       }
@@ -247,18 +276,15 @@ export function generate(input: CreatureSpec): Creature {
   // ─── wings ────────────────────────────────────────────────────────────────
   if (spec.wings.type !== 'none') {
     for (const side of [-1, 1]) {
+      // The wing sits outside the torso's own surface, swept back along the body.
       const node = joint(
         side < 0 ? 'wingL' : 'wingR',
         spine,
-        { x: side * torsoW * 0.38, y: dims.spineLength * 0.7, z: -torsoD * 0.22 },
-        rest(-0.55, 0, side * 1.05),
+        { x: side * torsoW * 0.52 * shape.wide, y: dims.spineLength * 0.66, z: -torsoD * 0.12 },
+        rest(-0.18, side * 0.93, side * 0.22),
       )
-      for (const placed of parts.wing(dims, palette, res, spec.wings.type)) {
-        attach(node, {
-          ...placed,
-          geometry: placed.geometry.clone(),
-          ...(placed.position ? { position: { ...placed.position, x: side * placed.position.x } } : {}),
-        })
+      for (const placed of parts.wing(forge, spec.wings.type)) {
+        attach(node, side < 0 ? mirrored(placed) : placed)
       }
     }
   }
@@ -279,11 +305,11 @@ export function generate(input: CreatureSpec): Creature {
     mesh(
       `tail${index}Mesh`,
       node,
-      parts.tailSegment(palette, res, segmentLength, taper(0), taper(1), pointed),
+      parts.tailSegment(forge, segmentLength, taper(0), taper(1), pointed),
     )
 
     if (isLast) {
-      const tip = parts.tailTip(palette, res, spec.tail.type, Math.max(0.02, taper(1)))
+      const tip = parts.tailTip(forge, spec.tail.type, Math.max(0.02, taper(1)))
       if (tip) mesh('tailTip', node, tip, { x: 0, y: 0, z: -segmentLength })
     }
 

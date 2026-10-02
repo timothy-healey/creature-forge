@@ -1,10 +1,12 @@
 import * as THREE from 'three'
 import {
+  fan,
   hangDown,
   pointBackward,
   pointForward,
   prism,
   sample,
+  type CrossSection,
   type Profile,
   type Resolution,
 } from './geometry'
@@ -14,8 +16,13 @@ import type { CreatureSpec } from './spec'
  * Every body part, as a profile rather than a fixed mesh.
  *
  * A builder here says what shape a part is — how wide it is at each point along
- * its length — and the resolution decides how many vertices describe that shape.
- * Nothing in this file knows how many sides it will end up with.
+ * its length, and what its cross-section looks like — and the resolution decides
+ * how many vertices describe it. Nothing in this file knows how many sides it
+ * will end up with.
+ *
+ * Anything that should read as a sheet rather than a tube — a wing membrane, a
+ * back plate, a frill, a tail fan — is built with `fan` instead of `prism`. A
+ * swept cross-section is always a tube, however it is tapered.
  */
 
 export interface Dims {
@@ -38,6 +45,25 @@ export interface Palette {
   eye: THREE.Color
 }
 
+/** The three genes, resolved into numbers the builders use directly. */
+export interface Shape {
+  /** Cross-section exponent: low is faceted, high is slabby. */
+  power: number
+  /** Width multiplier. */
+  wide: number
+  /** Depth multiplier. */
+  deep: number
+  /** Where mass sits along a part: 0 at the base, 1 at the far end. */
+  bulk: number
+}
+
+export interface Forge {
+  dims: Dims
+  palette: Palette
+  res: Resolution
+  shape: Shape
+}
+
 /** A geometry with somewhere to sit. The generator parents these to joints. */
 export interface Placed {
   name: string
@@ -46,45 +72,54 @@ export interface Placed {
   rotation?: THREE.Vector3Like
 }
 
+type Point = readonly [number, number]
+
+/** A bulge that peaks wherever the `bulk` gene puts it, zero at both ends. */
+function hump(t: number, peak: number): number {
+  const at = Math.min(0.9, Math.max(0.1, peak))
+  return Math.sin(Math.PI * (t <= at ? t / (2 * at) : 0.5 + (t - at) / (2 * (1 - at))))
+}
+
 const taper = (from: number, to: number) => (t: number) => from + (to - from) * t
+
+function section(shape: Shape, frontBias = 1): CrossSection {
+  return { power: shape.power, frontBias }
+}
 
 // ─── body ───────────────────────────────────────────────────────────────────
 
-/**
- * The torso. `segments` ripples the profile rather than adding rings, so a
- * five-segment creature reads as segmented at any resolution.
- */
-export function torsoProfile(dims: Dims, segments: number): Profile {
+export function torsoProfile({ dims, shape }: Forge, segments: number): Profile {
+  const peak = 0.28 + shape.bulk * 0.44
   const ripple = (t: number) => 1 + 0.09 * Math.sin(t * Math.PI * segments * 2)
-  const bulge = (t: number) => (0.74 + 0.26 * Math.sin(Math.PI * t ** 0.85)) * ripple(t)
+  const swell = (t: number) => (0.68 + 0.36 * hump(t, peak)) * ripple(t)
 
   return {
-    rx: (t) => dims.torsoW * 0.5 * bulge(t),
-    rz: (t) => dims.torsoD * 0.5 * bulge(t),
+    rx: (t) => dims.torsoW * 0.5 * shape.wide * swell(t),
+    rz: (t) => dims.torsoD * 0.5 * shape.deep * swell(t),
     yaw: (t) => Math.sin(t * Math.PI * 2) * 0.07,
   }
 }
 
-export function torso(dims: Dims, palette: Palette, res: Resolution, segments: number): Placed {
-  const profile = torsoProfile(dims, segments)
+export function torso(forge: Forge, segments: number): Placed {
+  const { palette, res, shape } = forge
 
   return {
     name: 'torso',
     geometry: prism({
       sides: res.sides(6),
-      sections: sample(profile, dims.spineLength, res.bands(Math.max(3, segments * 1.4))),
+      sections: sample(torsoProfile(forge, segments), forge.dims.spineLength, res.bands(Math.max(3, segments * 1.4))),
+      shape: section(shape, 0.88 + shape.bulk * 0.62),
       colors: { side: palette.body, belly: palette.belly, cap: palette.belly },
       bellyWidth: 0.95,
     }),
   }
 }
 
-/** The neck, with a gentle S-curve that only shows on a long one. */
-export function neck(dims: Dims, palette: Palette, res: Resolution): Placed {
+export function neck({ dims, palette, res, shape }: Forge): Placed {
   const profile: Profile = {
-    rx: taper(dims.torsoW * 0.22, dims.torsoW * 0.17),
-    rz: taper(dims.torsoD * 0.23, dims.torsoD * 0.19),
-    dz: (t) => dims.neckLen * 0.18 * Math.sin(t * Math.PI),
+    rx: taper(dims.torsoW * 0.22 * shape.wide, dims.torsoW * 0.16 * shape.wide),
+    rz: taper(dims.torsoD * 0.24 * shape.deep, dims.torsoD * 0.18 * shape.deep),
+    dz: (t) => dims.neckLen * 0.2 * Math.sin(t * Math.PI),
   }
 
   return {
@@ -92,6 +127,7 @@ export function neck(dims: Dims, palette: Palette, res: Resolution): Placed {
     geometry: prism({
       sides: res.sides(5),
       sections: sample(profile, dims.neckLen, res.bands(2)),
+      shape: section(shape, 1.05),
       colors: { side: palette.body, belly: palette.belly },
     }),
   }
@@ -99,13 +135,12 @@ export function neck(dims: Dims, palette: Palette, res: Resolution): Placed {
 
 // ─── head ───────────────────────────────────────────────────────────────────
 
-export function skull(dims: Dims, palette: Palette, res: Resolution): Placed {
-  const bulge = (t: number) => 0.74 + 0.26 * Math.sin(Math.PI * t ** 0.9)
-
+export function skull({ dims, palette, res, shape }: Forge): Placed {
+  const peak = 0.3 + shape.bulk * 0.35
   const profile: Profile = {
-    rx: (t) => dims.headW * 0.5 * bulge(t),
-    rz: (t) => dims.headD * 0.5 * bulge(t),
-    dz: (t) => dims.headD * 0.06 * Math.sin(Math.PI * t) - dims.headD * 0.03 * t,
+    rx: (t) => dims.headW * 0.5 * shape.wide * (0.62 + 0.42 * hump(t, peak)),
+    rz: (t) => dims.headD * 0.5 * shape.deep * (0.62 + 0.42 * hump(t, peak)),
+    dz: (t) => dims.headD * 0.08 * Math.sin(Math.PI * t) - dims.headD * 0.04 * t,
   }
 
   return {
@@ -113,28 +148,34 @@ export function skull(dims: Dims, palette: Palette, res: Resolution): Placed {
     geometry: prism({
       sides: res.sides(6),
       sections: sample(profile, dims.headH, res.bands(2)),
+      shape: section(shape, 0.95 + shape.bulk * 0.45),
       colors: { side: palette.body, belly: palette.belly, cap: palette.body },
       bellyWidth: 0.6,
     }),
   }
 }
 
-export function face(dims: Dims, palette: Palette, res: Resolution, type: CreatureSpec['head']['type']): Placed[] {
-  const front = dims.headD * 0.34
+export function face(forge: Forge, type: CreatureSpec['head']['type']): Placed[] {
+  const { dims, palette, res, shape } = forge
+  const front = dims.headD * 0.3
 
   if (type === 'snout') {
-    const profile: Profile = {
-      rx: (t) => dims.headW * (0.34 - 0.14 * t),
-      rz: (t) => dims.headH * (0.28 - 0.13 * t),
-      dz: (t) => dims.headH * 0.08 * t * t,
-    }
     return [
       {
         name: 'snout',
         geometry: pointForward(
           prism({
             sides: res.sides(5),
-            sections: sample(profile, dims.headLen, res.bands(2)),
+            sections: sample(
+              {
+                rx: (t) => dims.headW * shape.wide * (0.32 - 0.14 * t),
+                rz: (t) => dims.headH * shape.deep * (0.3 - 0.15 * t),
+                dz: (t) => dims.headH * 0.09 * t * t,
+              },
+              dims.headLen,
+              res.bands(2),
+            ),
+            shape: section(shape, 0.8),
             colors: { side: palette.body, belly: palette.belly, cap: palette.belly },
           }),
         ),
@@ -144,18 +185,22 @@ export function face(dims: Dims, palette: Palette, res: Resolution, type: Creatu
   }
 
   if (type === 'beak') {
-    const profile: Profile = {
-      rx: (t) => dims.headW * 0.27 * (1 - t) ** 1.3,
-      rz: (t) => dims.headH * 0.23 * (1 - t) ** 1.2,
-      dz: (t) => dims.headH * 0.17 * t ** 1.4,
-    }
     return [
       {
         name: 'beak',
         geometry: pointForward(
           prism({
             sides: res.sides(4),
-            sections: sample(profile, dims.headLen * 1.3, res.bands(2)),
+            sections: sample(
+              {
+                rx: (t) => dims.headW * 0.26 * shape.wide * (1 - t) ** 1.3,
+                rz: (t) => dims.headH * 0.24 * shape.deep * (1 - t) ** 1.2,
+                dz: (t) => dims.headH * 0.17 * t ** 1.4,
+              },
+              dims.headLen * 1.3,
+              res.bands(2),
+            ),
+            shape: section(shape, 0.7),
             colors: { side: palette.accent },
             tip: 'top',
           }),
@@ -172,13 +217,14 @@ export function face(dims: Dims, palette: Palette, res: Resolution, type: Creatu
         sides: res.sides(6),
         sections: sample(
           {
-            rx: (t) => dims.headW * (0.42 - 0.06 * t),
-            rz: (t) => dims.headH * (0.32 - 0.07 * t),
+            rx: (t) => dims.headW * shape.wide * (0.4 - 0.06 * t),
+            rz: (t) => dims.headH * shape.deep * (0.33 - 0.07 * t),
             dz: (t) => dims.headH * 0.05 * t,
           },
           dims.headLen * 0.55,
           res.bands(2),
         ),
+        shape: section(shape, 1.1),
         colors: { side: palette.body, belly: palette.belly, cap: palette.belly },
       }),
     ),
@@ -187,31 +233,37 @@ export function face(dims: Dims, palette: Palette, res: Resolution, type: Creatu
 
   if (type === 'blunt') return [muzzle]
 
-  // 'crest' — a blunt face under a swept plate, the parasaurolophus silhouette.
-  const crest: Placed = {
-    name: 'crest',
-    geometry: pointBackward(
-      prism({
-        sides: res.sides(4),
-        sections: sample(
-          {
-            rx: (t) => dims.headW * 0.07 * (1 - t * 0.6),
-            rz: (t) => dims.headH * (0.34 + 0.3 * Math.sin(Math.PI * t)) * (1 - t * 0.35),
-          },
-          dims.headLen * 1.15,
-          res.bands(3),
-        ),
-        colors: { side: palette.accent, cap: palette.accent },
-      }),
-    ),
-    position: { x: 0, y: dims.headH * 0.9, z: -dims.headD * 0.1 },
-    rotation: { x: -0.35, y: 0, z: 0 },
-  }
-
-  return [muzzle, crest]
+  // 'crest' — a blunt face under a swept plate, built as a sheet, not a tube.
+  const length = dims.headLen * 1.25
+  const height = dims.headH * 0.75
+  return [
+    muzzle,
+    {
+      name: 'crest',
+      geometry: sagittal(
+        fan({
+          origin: [0, 0],
+          rim: scalloped(
+            [
+              [0, -length * 0.18],
+              [height * 0.72, -length * 0.35],
+              [height, -length * 0.02],
+              [height * 0.66, length * 0.42],
+              [0, length * 0.6],
+            ],
+            [0, 0],
+            0.82,
+          ),
+          color: palette.accent,
+        }),
+      ),
+      position: { x: 0, y: dims.headH * 0.86, z: -dims.headD * 0.12 },
+      rotation: { x: 0.35, y: 0, z: 0 },
+    },
+  ]
 }
 
-export function eyes(dims: Dims, palette: Palette, res: Resolution): Placed[] {
+export function eyes({ dims, palette, res, shape }: Forge): Placed[] {
   const size = Math.max(0.03, dims.headW * 0.11)
 
   return [-1, 1].map((side) => ({
@@ -219,15 +271,16 @@ export function eyes(dims: Dims, palette: Palette, res: Resolution): Placed[] {
     geometry: pointForward(
       prism({
         sides: res.sides(4),
-        sections: sample({ rx: taper(size, size * 0.7), rz: taper(size * 0.72, size * 0.48) }, size * 0.9, 1),
+        sections: sample({ rx: taper(size, size * 0.66), rz: taper(size * 0.7, size * 0.44) }, size * 0.95, 1),
+        shape: section(shape),
         colors: { side: palette.eye },
       }),
     ),
-    position: { x: side * dims.headW * 0.27, y: dims.headH * 0.6, z: dims.headD * 0.38 },
+    position: { x: side * dims.headW * 0.26, y: dims.headH * 0.58, z: dims.headD * 0.34 },
   }))
 }
 
-export function horns(dims: Dims, palette: Palette, res: Resolution, count: number): Placed[] {
+export function horns({ dims, palette, res, shape }: Forge, count: number): Placed[] {
   if (count === 0) return []
   const length = 0.12 + dims.headW * 0.45
   const thickness = dims.headW * 0.1
@@ -246,16 +299,17 @@ export function horns(dims: Dims, palette: Palette, res: Resolution, count: numb
         length,
         res.bands(2),
       ),
+      shape: section(shape, 0.9),
       colors: { side: palette.accent },
       tip: 'top',
     }),
-    position: { x, y: dims.headH * 0.88, z: -dims.headD * 0.06 },
+    position: { x, y: dims.headH * 0.86, z: -dims.headD * 0.06 },
     rotation: { x: -0.45, y: 0, z: -x * 1.6 },
   }))
 }
 
 /** Ear geometry, built pointing up — the generator swings it into place. */
-export function ear(dims: Dims, palette: Palette, res: Resolution, type: CreatureSpec['head']['ears']): Placed | null {
+export function ear({ dims, palette, res, shape }: Forge, type: CreatureSpec['head']['ears']): Placed | null {
   if (type === 'none') return null
   const width = dims.headW * 0.16
 
@@ -265,10 +319,11 @@ export function ear(dims: Dims, palette: Palette, res: Resolution, type: Creatur
       geometry: prism({
         sides: res.sides(4),
         sections: sample(
-          { rx: (t) => width * (1 - t) ** 0.7, rz: (t) => width * 0.5 * (1 - t) ** 0.7 },
-          dims.headW * 0.58,
+          { rx: (t) => width * (1 - t) ** 0.7, rz: (t) => width * 0.42 * (1 - t) ** 0.7 },
+          dims.headW * 0.6,
           res.bands(2),
         ),
+        shape: section(shape, 0.8),
         colors: { side: palette.body, cap: palette.belly },
         tip: 'top',
       }),
@@ -283,87 +338,99 @@ export function ear(dims: Dims, palette: Palette, res: Resolution, type: Creatur
         sections: sample(
           {
             rx: (t) => width * (0.9 - 0.55 * t),
-            rz: (t) => width * 0.44 * (1 - 0.4 * t),
-            dz: (t) => dims.headW * 0.3 * t * t,
+            rz: (t) => width * 0.4 * (1 - 0.4 * t),
+            dz: (t) => dims.headW * 0.32 * t * t,
           },
           dims.headW * 1.5,
           res.bands(3),
         ),
+        shape: section(shape, 0.85),
         colors: { side: palette.body, belly: palette.belly, cap: palette.belly },
       }),
     }
   }
 
-  // 'frill' — a wide thin fan standing off the side of the skull.
+  // 'frill' — a sheet standing off the skull, not a flattened tube.
+  const reach = dims.headW * 0.95
   return {
     name: 'ear',
-    geometry: prism({
-      sides: res.sides(4),
-      sections: sample(
-        {
-          rx: () => width * 0.22,
-          rz: (t) => dims.headD * (0.3 + 0.55 * Math.sin(Math.PI * t ** 0.8)),
-        },
-        dims.headW * 0.8,
-        res.bands(3),
+    geometry: fan({
+      origin: [0, 0],
+      rim: scalloped(
+        [
+          [0, -reach * 0.28],
+          [reach * 0.78, -reach * 0.34],
+          [reach, reach * 0.18],
+          [reach * 0.52, reach * 0.62],
+          [0, reach * 0.66],
+        ],
+        [0, 0],
+        0.8,
       ),
-      colors: { side: palette.accent, cap: palette.accent },
+      color: palette.accent,
     }),
   }
 }
 
 // ─── limbs ──────────────────────────────────────────────────────────────────
 
-/** A limb segment: thin at the far end, bulging mid-way, square at the joint. */
+/** A limb segment: thin at the far end, bulging where `bulk` puts the muscle. */
 export function limb(
-  palette: Palette,
-  res: Resolution,
+  { palette, res, shape }: Forge,
   length: number,
   near: number,
   bulge: number,
   far: number,
 ): THREE.BufferGeometry {
+  const peak = 0.3 + shape.bulk * 0.4
+  const swell = bulge - Math.max(near, far)
   const profile: Profile = {
-    rx: (t) => far + (near - far) * t + (bulge - Math.max(near, far)) * Math.sin(Math.PI * t) * 0.9,
-    rz: (t) => (far + (near - far) * t) * 0.96 + (bulge - Math.max(near, far)) * Math.sin(Math.PI * t) * 0.85,
-    yaw: (t) => Math.sin(Math.PI * t) * 0.2,
+    rx: (t) => (far + (near - far) * t + swell * hump(t, peak)) * shape.wide,
+    rz: (t) => (far + (near - far) * t + swell * hump(t, peak)) * shape.deep,
+    yaw: (t) => hump(t, peak) * 0.22,
   }
 
   return hangDown(
     prism({
       sides: res.sides(5),
       sections: sample(profile, length, res.bands(2)),
+      shape: section(shape, 1.12),
       colors: { side: palette.body },
     }),
   )
 }
 
-export function foot(dims: Dims, palette: Palette, res: Resolution, height: number): THREE.BufferGeometry {
+export function foot({ dims, palette, res, shape }: Forge, height: number): THREE.BufferGeometry {
   const length = dims.legThick * 2.2
-  const profile: Profile = {
-    rx: (t) => dims.legThick * (0.52 - 0.18 * t ** 1.6),
-    rz: (t) => height * (0.5 - 0.24 * t ** 1.4),
-    dz: (t) => -height * 0.2 * t,
-  }
 
   return pointForward(
     prism({
       sides: res.sides(5),
-      sections: sample(profile, length, res.bands(2)),
+      sections: sample(
+        {
+          rx: (t) => dims.legThick * shape.wide * (0.52 - 0.18 * t ** 1.6),
+          rz: (t) => height * (0.5 - 0.24 * t ** 1.4),
+          dz: (t) => -height * 0.2 * t,
+        },
+        length,
+        res.bands(2),
+      ),
+      shape: section(shape, 0.8),
       colors: { side: palette.body, cap: palette.accent },
     }),
   )
 }
 
-export function hand(palette: Palette, res: Resolution, thickness: number): THREE.BufferGeometry {
+export function hand({ palette, res, shape }: Forge, thickness: number): THREE.BufferGeometry {
   return hangDown(
     prism({
       sides: res.sides(5),
       sections: sample(
-        { rx: taper(thickness * 0.5, thickness * 0.42), rz: taper(thickness * 0.56, thickness * 0.46) },
+        { rx: taper(thickness * 0.5, thickness * 0.42), rz: taper(thickness * 0.58, thickness * 0.46) },
         thickness * 0.85,
         res.bands(1),
       ),
+      shape: section(shape, 1.2),
       colors: { side: palette.accent },
     }),
   )
@@ -372,13 +439,12 @@ export function hand(palette: Palette, res: Resolution, thickness: number): THRE
 // ─── decoration ─────────────────────────────────────────────────────────────
 
 /**
- * One element of a back ridge, built pointing backward along the spine's -Z —
- * which is straight up on a quadruped and straight back on an upright creature.
+ * One element of a back ridge. Spines stay as cones, because a spine is a cone;
+ * plates and sails are sheets standing in the creature's midline, because a
+ * plate built as a prism is a slab and reads as one.
  */
 export function ridgeElement(
-  dims: Dims,
-  palette: Palette,
-  res: Resolution,
+  { dims, palette, res, shape }: Forge,
   type: CreatureSpec['back']['ridge'],
   along: number,
 ): THREE.BufferGeometry | null {
@@ -386,7 +452,7 @@ export function ridgeElement(
   const swell = Math.sin(Math.PI * along ** 0.85)
 
   if (type === 'spines') {
-    const height = dims.torsoW * (0.22 + 0.4 * swell)
+    const height = dims.torsoW * (0.22 + 0.44 * swell)
     return pointBackward(
       prism({
         sides: res.sides(4),
@@ -395,6 +461,7 @@ export function ridgeElement(
           height,
           res.bands(1),
         ),
+        shape: section(shape, 1),
         colors: { side: palette.accent },
         tip: 'top',
       }),
@@ -402,75 +469,83 @@ export function ridgeElement(
   }
 
   const tall = type === 'sail'
-  const height = dims.torsoW * (tall ? 0.35 + 1.05 * swell : 0.2 + 0.5 * swell)
-  const spread = dims.spineLength * (tall ? 0.09 : 0.12)
+  const height = dims.torsoW * (tall ? 0.4 + 1.2 * swell : 0.24 + 0.58 * swell)
+  const half = dims.spineLength * (tall ? 0.085 : 0.11)
 
-  return pointBackward(
-    prism({
-      sides: res.sides(4),
-      sections: sample(
-        {
-          rx: (t) => dims.torsoW * 0.035 * (1 - 0.5 * t),
-          rz: (t) => spread * (1 - 0.45 * t ** 1.5),
-        },
-        height,
-        res.bands(2),
+  return sagittal(
+    fan({
+      origin: [0, 0],
+      rim: scalloped(
+        [
+          [0, -half],
+          [height * 0.62, -half * 0.72],
+          [height, 0],
+          [height * 0.62, half * 0.72],
+          [0, half],
+        ],
+        [0, 0],
+        0.86,
       ),
-      colors: { side: palette.accent, cap: palette.accent },
+      color: palette.accent,
     }),
   )
 }
 
-/** A folded wing: a spar swept up and back, with a membrane hanging off it. */
-export function wing(
-  dims: Dims,
-  palette: Palette,
-  res: Resolution,
-  type: CreatureSpec['wings']['type'],
-): Placed[] {
+/**
+ * A folded wing: a leading-edge spar, a strut, and a scalloped membrane fanned
+ * between them.
+ *
+ * Everything is built in local +X and mirrored by turning the whole wing around
+ * rather than by negating a coordinate, so nothing ever reaches back across the
+ * midline into the torso.
+ */
+export function wing({ dims, palette, res, shape }: Forge, type: CreatureSpec['wings']['type']): Placed[] {
   if (type === 'none') return []
-  const scale = type === 'large' ? 1.6 : 1
-  const span = dims.spineLength * 0.72 * scale
+  const span = dims.spineLength * (type === 'large' ? 1.15 : 0.74)
 
-  return [
-    {
-      name: 'spar',
+  const tip: Point = [span * 0.96, span * 0.5]
+  const knuckles: Point[] = [
+    tip,
+    [span * 0.82, span * 0.02],
+    [span * 0.54, -span * 0.3],
+    [span * 0.26, -span * 0.44],
+    [span * 0.03, -span * 0.14],
+  ]
+  const origin: Point = [span * 0.05, span * 0.24]
+
+  const bone = (to: Point, thickness: number, name: string): Placed => {
+    const length = Math.hypot(to[0], to[1])
+    return {
+      name,
       geometry: prism({
         sides: res.sides(4),
         sections: sample(
-          { rx: (t) => dims.torsoW * 0.06 * (1 - t) ** 0.7, rz: (t) => dims.torsoW * 0.05 * (1 - t) ** 0.7 },
-          span,
-          res.bands(2),
+          { rx: (t) => thickness * (1 - 0.6 * t), rz: (t) => thickness * (1 - 0.6 * t) },
+          length,
+          res.bands(1),
         ),
+        shape: section(shape, 1),
         colors: { side: palette.accent },
         tip: 'top',
       }),
-    },
+      rotation: { x: 0, y: 0, z: Math.atan2(-to[0], to[1]) },
+    }
+  }
+
+  return [
     {
       name: 'membrane',
-      geometry: prism({
-        sides: res.sides(3),
-        sections: sample(
-          {
-            rx: () => dims.torsoW * 0.025,
-            rz: (t) => dims.torsoD * (0.3 + 0.75 * Math.sin(Math.PI * t ** 0.7)) * scale,
-            dz: (t) => -dims.torsoD * 0.3 * t * scale,
-          } satisfies Profile,
-          span * 0.88,
-          res.bands(3),
-        ),
-        colors: { side: palette.belly, cap: palette.belly },
-      }),
-      position: { x: dims.torsoW * 0.03, y: 0, z: 0 },
+      geometry: fan({ origin, rim: scalloped(knuckles, origin, 0.78), color: palette.belly }),
     },
+    bone(tip, dims.torsoW * 0.05, 'wingSpar'),
+    bone(knuckles[2]!, dims.torsoW * 0.035, 'wingStrut'),
   ]
 }
 
 // ─── tail ───────────────────────────────────────────────────────────────────
 
 export function tailSegment(
-  palette: Palette,
-  res: Resolution,
+  { palette, res, shape }: Forge,
   length: number,
   from: number,
   to: number,
@@ -480,10 +555,15 @@ export function tailSegment(
     prism({
       sides: res.sides(5),
       sections: sample(
-        { rx: taper(from, tip ? 0 : to), rz: taper(from, tip ? 0 : to), yaw: (t) => t * 0.25 },
+        {
+          rx: taper(from * shape.wide, tip ? 0 : to * shape.wide),
+          rz: taper(from * shape.deep, tip ? 0 : to * shape.deep),
+          yaw: (t) => t * 0.25,
+        },
         length,
         res.bands(2),
       ),
+      shape: section(shape, 1.1),
       colors: { side: palette.body, belly: palette.belly, cap: palette.body },
       ...(tip ? { tip: 'top' as const } : {}),
     }),
@@ -492,8 +572,7 @@ export function tailSegment(
 
 /** The business end of a club or fan tail. */
 export function tailTip(
-  palette: Palette,
-  res: Resolution,
+  { palette, res, shape }: Forge,
   type: CreatureSpec['tail']['type'],
   radius: number,
 ): THREE.BufferGeometry | null {
@@ -503,33 +582,67 @@ export function tailTip(
         sides: res.sides(6),
         sections: sample(
           {
-            rx: (t) => radius * (0.8 + 1.5 * Math.sin(Math.PI * t)),
-            rz: (t) => radius * (0.8 + 1.5 * Math.sin(Math.PI * t)),
+            rx: (t) => radius * (0.8 + 1.6 * Math.sin(Math.PI * t)) * shape.wide,
+            rz: (t) => radius * (0.8 + 1.6 * Math.sin(Math.PI * t)) * shape.deep,
           },
           radius * 3.4,
           res.bands(3),
         ),
+        shape: section(shape, 1),
         colors: { side: palette.accent, cap: palette.accent },
       }),
     )
   }
 
   if (type === 'fan') {
-    return pointBackward(
-      prism({
-        sides: res.sides(4),
-        sections: sample(
-          {
-            rx: (t) => radius * (0.6 + 2.6 * t ** 0.7),
-            rz: (t) => radius * (0.7 - 0.45 * t),
-          },
-          radius * 3,
-          res.bands(2),
+    const reach = radius * 5
+    return horizontal(
+      fan({
+        origin: [0, 0],
+        rim: scalloped(
+          [
+            [-reach * 0.7, 0],
+            [-reach * 0.78, reach * 0.62],
+            [0, reach * 0.95],
+            [reach * 0.78, reach * 0.62],
+            [reach * 0.7, 0],
+          ],
+          [0, 0],
+          0.84,
         ),
-        colors: { side: palette.accent, cap: palette.belly },
+        color: palette.accent,
       }),
     )
   }
 
   return null
+}
+
+// ─── sheet helpers ──────────────────────────────────────────────────────────
+
+/** Pulls a midpoint between each pair of rim points inward, scalloping the edge. */
+function scalloped(points: readonly Point[], origin: Point, pull: number): Point[] {
+  const out: Point[] = []
+  for (let i = 0; i < points.length; i++) {
+    const current = points[i]!
+    out.push(current)
+    const next = points[i + 1]
+    if (!next) continue
+    const midX = (current[0] + next[0]) / 2
+    const midY = (current[1] + next[1]) / 2
+    out.push([origin[0] + (midX - origin[0]) * pull, origin[1] + (midY - origin[1]) * pull])
+  }
+  return out
+}
+
+/** Stands a sheet in the creature's midline: its width becomes height above the back. */
+function sagittal(geometry: THREE.BufferGeometry): THREE.BufferGeometry {
+  geometry.rotateY(Math.PI / 2)
+  return geometry
+}
+
+/** Lays a sheet flat and trailing backward: a tail fan. */
+function horizontal(geometry: THREE.BufferGeometry): THREE.BufferGeometry {
+  geometry.rotateX(-Math.PI / 2)
+  return geometry
 }

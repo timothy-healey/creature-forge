@@ -38,10 +38,26 @@ export interface PrismColors {
   belly?: THREE.Color
 }
 
+/**
+ * The shape of a cross-section, as a superellipse.
+ *
+ * `power` is the whole fluid-to-angular axis: 1 is a diamond with hard corners,
+ * 2 an ellipse, 4 and up a slab. A swept regular polygon is always a tube, and
+ * this is what stops every part being one.
+ */
+export interface CrossSection {
+  power: number
+  /** Swells the front (+Z) against the back — a belly, a brisket, a keel. */
+  frontBias: number
+}
+
+export const ROUND: CrossSection = { power: 2, frontBias: 1 }
+
 export interface PrismOptions {
   sides: number
   sections: readonly Section[]
   colors: PrismColors
+  shape?: CrossSection
   /** Collapses one end into a single point: a horn, a beak, the end of a tail. */
   tip?: 'top' | 'bottom'
   /** How far round from front the belly colour reaches, in radians. */
@@ -57,7 +73,7 @@ export function prism(options: PrismOptions): THREE.BufferGeometry {
   const sections = options.sections
   if (sections.length < 2) throw new Error('a prism needs at least two sections')
 
-  const unit = unitRing(sides)
+  const unit = unitRing(sides, options.shape ?? ROUND)
   const sideColor = options.colors.side
   const capColor = options.colors.cap ?? sideColor
   const bellyColor = options.colors.belly
@@ -150,24 +166,77 @@ export function prism(options: PrismOptions): THREE.BufferGeometry {
 }
 
 /**
- * The cross-section's corners, normalised so that `rx` and `rz` mean half-width
- * and half-depth whatever the side count — a five-sided limb and a six-sided one
- * asked for the same thickness come out the same thickness.
+ * The cross-section's corners, normalised so that `rx` and `rz` keep meaning
+ * half-width and half-depth whatever the side count or shape — a five-sided
+ * limb and an eight-sided one asked for the same thickness come out the same
+ * thickness.
+ *
+ * Width is normalised across its full span and centred. Depth is normalised
+ * against the *back* half only, so `frontBias` has somewhere to push: the back
+ * still reaches `rz` and the belly reaches `rz * frontBias`, with the origin
+ * resting at the waist of the shape.
  */
-function unitRing(sides: number): { x: number; z: number }[] {
-  const angles = Array.from({ length: sides }, (_, i) => (TAU * (i + 0.5)) / sides)
-  const cosines = angles.map(Math.cos)
-  const sines = angles.map(Math.sin)
+function unitRing(sides: number, shape: CrossSection): { x: number; z: number }[] {
+  const exponent = 2 / Math.max(0.4, shape.power)
+  const bias = Math.max(0.05, shape.frontBias)
 
-  const spanX = Math.max(...cosines) - Math.min(...cosines)
-  const spanZ = Math.max(...sines) - Math.min(...sines)
-  const midX = (Math.max(...cosines) + Math.min(...cosines)) / 2
-  const midZ = (Math.max(...sines) + Math.min(...sines)) / 2
+  const corners = Array.from({ length: sides }, (_, i) => {
+    const angle = (TAU * (i + 0.5)) / sides
+    const cos = Math.cos(angle)
+    const sin = Math.sin(angle)
+    const z = Math.sign(sin) * Math.abs(sin) ** exponent
+    return { x: Math.sign(cos) * Math.abs(cos) ** exponent, z: z > 0 ? z * bias : z }
+  })
 
-  return angles.map((_, i) => ({
-    x: ((cosines[i]! - midX) * 2) / spanX,
-    z: ((sines[i]! - midZ) * 2) / spanZ,
+  const xs = corners.map((corner) => corner.x)
+  const spanX = Math.max(...xs) - Math.min(...xs) || 1
+  const midX = (Math.max(...xs) + Math.min(...xs)) / 2
+  const depth = Math.max(...corners.map((corner) => Math.abs(Math.min(0, corner.z)))) || 1
+
+  return corners.map((corner) => ({
+    x: ((corner.x - midX) * 2) / spanX,
+    z: corner.z / depth,
   }))
+}
+
+/**
+ * A flat membrane: triangles fanned from one point out to a rim, emitted facing
+ * both ways because a wing is visible from either side.
+ *
+ * Built in the XY plane at z = 0, so the generator rotates it into place. A fan
+ * from the wrist is how a real wing is spanned, which is why the trailing edge
+ * can be scalloped without the triangulation ever going wrong.
+ */
+export function fan(options: {
+  origin: readonly [number, number]
+  rim: readonly (readonly [number, number])[]
+  color: THREE.Color
+}): THREE.BufferGeometry {
+  const positions: number[] = []
+  const colors: number[] = []
+  const [ox, oy] = options.origin
+
+  const push = (x: number, y: number) => {
+    positions.push(x, y, 0)
+    colors.push(options.color.r, options.color.g, options.color.b)
+  }
+
+  for (let i = 0; i < options.rim.length - 1; i++) {
+    const a = options.rim[i]!
+    const b = options.rim[i + 1]!
+    push(ox, oy)
+    push(a[0], a[1])
+    push(b[0], b[1])
+    push(ox, oy)
+    push(b[0], b[1])
+    push(a[0], a[1])
+  }
+
+  const geometry = new THREE.BufferGeometry()
+  geometry.setAttribute('position', new THREE.BufferAttribute(new Float32Array(positions), 3))
+  geometry.setAttribute('color', new THREE.BufferAttribute(new Float32Array(colors), 3))
+  geometry.computeVertexNormals()
+  return geometry
 }
 
 /** Swings a part so it points forward (+Z): snouts, beaks, feet. */
@@ -239,9 +308,14 @@ export interface Resolution {
   repeats(base: number): number
 }
 
-export function resolutionFor(detail: number): Resolution {
+/**
+ * `edge` runs soft to sharp. A soft creature gets more corners around each
+ * cross-section; a sharp one gets few, so its facets read as planes.
+ */
+export function resolutionFor(detail: number, edge = 0.5): Resolution {
   const level = Math.min(1, Math.max(0, Number.isFinite(detail) ? detail : 0.5))
-  const sideScale = 0.6 + level * 1.4
+  const hardness = Math.min(1, Math.max(0, Number.isFinite(edge) ? edge : 0.5))
+  const sideScale = (0.6 + level * 1.4) * (1.42 - hardness * 0.84)
   const bandScale = 0.5 + level * 2.5
 
   return {
@@ -249,4 +323,39 @@ export function resolutionFor(detail: number): Resolution {
     bands: (base) => Math.max(1, Math.min(12, Math.round(base * bandScale))),
     repeats: (base) => Math.max(1, Math.min(16, Math.round(base * (0.6 + level * 1.2)))),
   }
+}
+
+/**
+ * Mirrors a part across the midline for the other side of the body.
+ *
+ * Negating X alone would turn every triangle inside out, so the second and
+ * third vertex of each are swapped to wind it outward again. This is why a wing
+ * can be built entirely in local +X and still appear on the left — nothing ever
+ * has to reach back across the midline into the torso.
+ */
+export function mirrorX(geometry: THREE.BufferGeometry): THREE.BufferGeometry {
+  const position = geometry.getAttribute('position') as THREE.BufferAttribute
+  const color = geometry.getAttribute('color') as THREE.BufferAttribute
+  const points = position.array as Float32Array
+  const tints = color.array as Float32Array
+
+  for (let i = 0; i < points.length; i += 3) points[i] = -points[i]!
+
+  for (let triangle = 0; triangle < points.length; triangle += 9) {
+    for (let axis = 0; axis < 3; axis++) {
+      const b = triangle + 3 + axis
+      const c = triangle + 6 + axis
+      const swap = points[b]!
+      points[b] = points[c]!
+      points[c] = swap
+      const tint = tints[b]!
+      tints[b] = tints[c]!
+      tints[c] = tint
+    }
+  }
+
+  position.needsUpdate = true
+  color.needsUpdate = true
+  geometry.computeVertexNormals()
+  return geometry
 }
