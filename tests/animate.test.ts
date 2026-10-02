@@ -3,8 +3,8 @@ import { GAITS, GAIT_PERIOD, applyPose, poseAt, type Gait, type Stance } from '.
 import { generate } from '../src/generate'
 import { defaultSpec } from '../src/spec'
 
-const BIPED: Stance = { build: 'upright', frontLimb: 'arms' }
-const QUADRUPED: Stance = { build: 'quadruped', frontLimb: 'forelegs' }
+const BIPED: Stance = { build: 'upright', frontLimb: 'arms', mesh: 'jointed', mutation: 'none' }
+const QUADRUPED: Stance = { build: 'quadruped', frontLimb: 'forelegs', mesh: 'jointed', mutation: 'none' }
 const STANCES: [string, Stance][] = [
   ['biped', BIPED],
   ['quadruped', QUADRUPED],

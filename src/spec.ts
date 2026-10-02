@@ -55,6 +55,20 @@ export type SegmentCount = 2 | 3 | 4 | 5
 
 export const BUILDS: readonly Build[] = ['upright', 'hunched', 'quadruped']
 export const MESH_MODES: readonly MeshMode[] = ['jointed', 'skinned']
+/**
+ * The mutations, in families. A mutation either changes the body's plan, or
+ * replaces what its surface is made of, or deforms the surface it already has —
+ * and which of the three it is tells you more than its name does.
+ */
+export const MUTATION_GROUPS: readonly { title: string; items: readonly Mutation[] }[] = [
+  { title: 'Plan', items: ['none', 'radial', 'segmented', 'coiled', 'recursive'] },
+  { title: 'Surface', items: ['strut', 'lattice', 'voxel', 'swarm', 'plated', 'shattered'] },
+  {
+    title: 'Deform',
+    items: ['melted', 'inflated', 'twisted', 'flattened', 'exploded', 'asymmetric', 'inverted'],
+  },
+]
+
 export const MUTATIONS: readonly Mutation[] = [
   'none',
   'radial',

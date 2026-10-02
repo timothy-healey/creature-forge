@@ -2,6 +2,7 @@
   --ink: #e8e3f2;
   --dim: #8d85a8;
   --panel: #241f33;
+  --sunk: #1c1829;
   --edge: #3a3350;
   --lit: #c9a2ff;
   color-scheme: dark;
@@ -16,13 +17,64 @@ body {
   font: 13px/1.45 ui-monospace, "SF Mono", Menlo, monospace;
 }
 
+/* Three zones: how you are looking at it, what it is, what size it is. */
 main {
   display: grid;
-  grid-template-columns: 1fr 268px;
+  grid-template-columns: 158px 1fr 262px;
+  grid-template-rows: auto 1fr;
+  grid-template-areas:
+    "modes     modes modes"
+    "mutations stage body";
   height: 100vh;
 }
 
+/* ─── top: how you are looking at it ───────────────────────────────────── */
+
+#modes {
+  grid-area: modes;
+  display: flex;
+  align-items: center;
+  gap: 18px;
+  padding: 9px 14px;
+  background: var(--panel);
+  border-bottom: 1px solid var(--edge);
+  overflow-x: auto;
+}
+
+.cell {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  flex: 0 0 auto;
+}
+
+.cell > span {
+  font-size: 9px;
+  letter-spacing: 0.16em;
+  text-transform: uppercase;
+  color: var(--dim);
+}
+
+.cell input[type="range"] { width: 86px; }
+
+/* ─── left: what it structurally is ────────────────────────────────────── */
+
+#mutations {
+  grid-area: mutations;
+  background: var(--panel);
+  border-right: 1px solid var(--edge);
+  overflow-y: auto;
+  padding: 10px 10px 28px;
+}
+
+.stack { display: grid; gap: 3px; }
+
+.stack button { text-align: left; padding-left: 8px; }
+
+/* ─── centre ───────────────────────────────────────────────────────────── */
+
 .stage {
+  grid-area: stage;
   position: relative;
   min-width: 0;
 }
@@ -48,56 +100,49 @@ main {
   pointer-events: none;
 }
 
-#controls {
+/* ─── right: its own measurements ──────────────────────────────────────── */
+
+#body {
+  grid-area: body;
   background: var(--panel);
   border-left: 1px solid var(--edge);
   overflow-y: auto;
-  padding: 14px 14px 32px;
+  padding: 4px 14px 32px;
 }
 
 h2 {
-  margin: 18px 0 8px;
-  font-size: 10px;
+  margin: 16px 0 7px;
+  font-size: 9px;
   font-weight: 600;
   letter-spacing: 0.16em;
   text-transform: uppercase;
   color: var(--dim);
 }
 
-section:first-of-type h2 { margin-top: 10px; }
+#mutations h2:first-child, #body section:first-of-type h2 { margin-top: 8px; }
+
+/* ─── shared controls ──────────────────────────────────────────────────── */
 
 .row {
   display: grid;
-  grid-template-columns: 86px 1fr;
+  grid-template-columns: 78px 1fr;
   align-items: center;
   gap: 8px;
-  margin-bottom: 6px;
-  color: var(--ink);
+  margin-bottom: 5px;
 }
 
 .row > span { color: var(--dim); font-size: 11px; }
 
-.row.wide {
-  display: block;
-  margin-bottom: 10px;
-}
+.row.wide { display: block; margin-bottom: 9px; }
+.row.wide > span { display: block; margin-bottom: 4px; }
+.row.wide .choices { display: grid; grid-template-columns: repeat(3, 1fr); }
 
-.row.wide > span {
-  display: block;
-  margin-bottom: 5px;
-}
+.choices { display: flex; gap: 3px; flex-wrap: wrap; }
 
-.choices { display: flex; gap: 4px; flex-wrap: wrap; }
-
-.row.wide .choices {
-  display: grid;
-  grid-template-columns: repeat(3, 1fr);
-}
-
-.choices button {
+button {
   flex: 1 1 auto;
-  padding: 4px 6px;
-  background: #1c1829;
+  padding: 4px 7px;
+  background: var(--sunk);
   color: var(--dim);
   border: 1px solid var(--edge);
   font: inherit;
@@ -105,42 +150,43 @@ section:first-of-type h2 { margin-top: 10px; }
   cursor: pointer;
 }
 
-.choices button[aria-pressed="true"] {
+button:hover { color: var(--ink); border-color: var(--lit); }
+
+button[aria-pressed="true"] {
   background: var(--lit);
   border-color: var(--lit);
   color: #1a1420;
 }
 
-input[type="range"] {
-  width: 100%;
-  accent-color: var(--lit);
+.roll {
+  flex: 0 0 auto;
+  align-self: stretch;
+  padding: 0 16px;
+  color: var(--ink);
+  border-color: var(--lit);
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
 }
+
+input[type="range"] { width: 100%; accent-color: var(--lit); }
 
 input[type="color"] {
   width: 100%;
-  height: 22px;
+  height: 21px;
   padding: 0;
   background: none;
   border: 1px solid var(--edge);
   cursor: pointer;
 }
 
-.roll {
-  display: block;
-  width: 100%;
-  margin-bottom: 4px;
-  padding: 8px;
-  background: #1c1829;
-  color: var(--ink);
-  border: 1px solid var(--lit);
-  font: inherit;
-  font-size: 11px;
-  letter-spacing: 0.14em;
-  text-transform: uppercase;
-  cursor: pointer;
-}
+@media (max-width: 860px) {
+  main {
+    grid-template-columns: 1fr;
+    grid-template-rows: auto 52vh auto auto;
+    grid-template-areas: "modes" "stage" "mutations" "body";
+    height: auto;
+  }
 
-.roll:hover {
-  background: var(--lit);
-  color: #1a1420;
+  #mutations, #body { border: none; border-top: 1px solid var(--edge); }
+  .stack { grid-template-columns: repeat(3, 1fr); }
 }

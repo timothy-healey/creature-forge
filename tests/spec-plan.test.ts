@@ -2,6 +2,8 @@ import { describe, expect, test } from 'vitest'
 import {
   BUILDS,
   EAR_TYPES,
+  MUTATIONS,
+  MUTATION_GROUPS,
   FRONT_LIMBS,
   RIDGE_TYPES,
   SEGMENT_COUNTS,
@@ -111,6 +113,22 @@ describe('the rolled palette', () => {
 
     for (const colors of rolls) {
       expect(luminance(colors.belly)).toBeGreaterThan(luminance(colors.body))
+    }
+  })
+})
+
+describe('the mutation families', () => {
+  test('cover every mutation exactly once, so none can vanish from the panel', () => {
+    const grouped = MUTATION_GROUPS.flatMap((group) => group.items)
+
+    expect([...grouped].sort()).toEqual([...MUTATIONS].sort())
+    expect(new Set(grouped).size).toBe(grouped.length)
+  })
+
+  test('name every family', () => {
+    for (const group of MUTATION_GROUPS) {
+      expect(group.title.length).toBeGreaterThan(0)
+      expect(group.items.length).toBeGreaterThan(0)
     }
   })
 })

@@ -1,6 +1,6 @@
 import type * as THREE from 'three'
 import type { RestMap, RestPose } from './joints'
-import type { Build, FrontLimb } from './spec'
+import type { CreatureSpec } from './spec'
 
 /**
  * Motion as arithmetic. `poseAt` is a pure function of time, gait and stance
@@ -21,10 +21,7 @@ export const GAIT_PERIOD: Record<Gait, number> = {
 }
 
 /** What the creature is standing on, which is all a gait needs to know about it. */
-export interface Stance {
-  build: Build
-  frontLimb: FrontLimb
-}
+export type Stance = CreatureSpec['body']
 
 /** An offset applied on top of a joint's rest pose. */
 export interface JointPose {
