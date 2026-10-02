@@ -361,5 +361,9 @@ export function mirrorX(geometry: THREE.BufferGeometry): THREE.BufferGeometry {
   position.needsUpdate = true
   color.needsUpdate = true
   geometry.computeVertexNormals()
+  // Three caches bounds; rewriting positions without clearing it leaves every
+  // later reader measuring the shape this part used to be.
+  geometry.boundingBox = null
+  geometry.boundingSphere = null
   return geometry
 }

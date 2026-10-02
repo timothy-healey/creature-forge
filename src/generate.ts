@@ -2,6 +2,7 @@ import * as THREE from 'three'
 import { mirrorX, resolutionFor } from './geometry'
 import { type RestMap, type RestPose, rest } from './joints'
 import * as parts from './parts'
+import { deform, type DeformPart } from './mutate'
 import { buildSkin, type SkinPiece } from './skin'
 import { type CreatureSpec, clampSpec } from './spec'
 
@@ -119,6 +120,7 @@ export function generate(input: CreatureSpec): Creature {
   const geometries: THREE.BufferGeometry[] = []
   const bones: THREE.Bone[] = []
   const pieces: SkinPiece[] = []
+  const deformable: DeformPart[] = []
   // A welded skin shades smoothly; a stack of rigid parts is faceted on purpose.
   const material = new THREE.MeshLambertMaterial({ vertexColors: true, flatShading: !bound })
   // Bound limbs push up into their parent so the two surfaces weld instead of abutting.
@@ -152,6 +154,7 @@ export function generate(input: CreatureSpec): Creature {
     if (placed.rotation) holder.rotation.set(placed.rotation.x, placed.rotation.y, placed.rotation.z)
     parent.add(holder)
     geometries.push(placed.geometry)
+    deformable.push({ geometry: placed.geometry, node: holder })
 
     if (bound) {
       pieces.push({ geometry: placed.geometry, node: holder, bone: ownerOf(parent) })
@@ -428,6 +431,16 @@ export function generate(input: CreatureSpec): Creature {
 
     tailParent = node
     tailAt = { x: 0, y: 0, z: -segmentLength }
+  }
+
+  // ─── deform, before anything is welded, so it composes with both modes ───
+  if (spec.body.mutation === 'shattered' || spec.body.mutation === 'melted') {
+    root.updateMatrixWorld(true)
+    const standing = new THREE.Box3().setFromObject(root)
+    deform(spec.body.mutation, deformable, {
+      scale: dims.torsoW,
+      ground: Number.isFinite(standing.min.y) ? standing.min.y : 0,
+    })
   }
 
   // ─── weld into one skin, if that is the mode ──────────────────────────────

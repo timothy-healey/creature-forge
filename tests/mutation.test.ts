@@ -2,7 +2,7 @@ import { describe, expect, test } from 'vitest'
 import * as THREE from 'three'
 import { CORE_JOINTS } from '../src/joints'
 import { generate } from '../src/generate'
-import { BUILDS, MESH_MODES, SEGMENT_COUNTS, defaultSpec, type CreatureSpec } from '../src/spec'
+import { BUILDS, MESH_MODES, MUTATIONS, SEGMENT_COUNTS, defaultSpec, type CreatureSpec } from '../src/spec'
 
 const mutated = (edit: (spec: CreatureSpec) => void = () => {}): CreatureSpec => {
   const spec = defaultSpec()
@@ -88,6 +88,165 @@ describe('the radial mutation', () => {
 
       expect(new THREE.Box3().setFromObject(creature.root).min.y, mesh).toBeCloseTo(0, 1)
       expect(creature.triangleCount, mesh).toBeGreaterThan(0)
+    }
+  })
+})
+
+describe('the shattered mutation', () => {
+  const shattered = (edit: (spec: CreatureSpec) => void = () => {}): CreatureSpec => {
+    const spec = defaultSpec()
+    spec.body.mutation = 'shattered'
+    edit(spec)
+    return spec
+  }
+
+  const vertices = (creature: ReturnType<typeof generate>): THREE.Vector3[] => {
+    const out: THREE.Vector3[] = []
+    creature.root.updateMatrixWorld(true)
+    creature.root.traverse((node) => {
+      const mesh = node as THREE.Mesh
+      if (!mesh.isMesh) return
+      const position = mesh.geometry.getAttribute('position')
+      for (let i = 0; i < position.count; i++) {
+        out.push(new THREE.Vector3().fromBufferAttribute(position, i).applyMatrix4(mesh.matrixWorld))
+      }
+    })
+    return out
+  }
+
+  test('keeps every triangle — it detaches them, it does not destroy them', () => {
+    expect(generate(shattered()).triangleCount).toBe(generate(defaultSpec()).triangleCount)
+  })
+
+  test('holds the creature’s silhouette while doing it', () => {
+    const whole = generate(defaultSpec())
+    const broken = generate(shattered())
+    whole.root.updateMatrixWorld(true)
+    broken.root.updateMatrixWorld(true)
+
+    const a = new THREE.Box3().setFromObject(whole.root).getSize(new THREE.Vector3())
+    const b = new THREE.Box3().setFromObject(broken.root).getSize(new THREE.Vector3())
+
+    for (const axis of ['x', 'y', 'z'] as const) {
+      expect(Math.abs(b[axis] - a[axis]) / a[axis], axis).toBeLessThan(0.25)
+    }
+  })
+
+  test('actually separates the shards rather than leaving the surface closed', () => {
+    const whole = new Set(vertices(generate(defaultSpec())).map((p) => `${p.x.toFixed(4)},${p.y.toFixed(4)},${p.z.toFixed(4)}`))
+    const broken = new Set(vertices(generate(shattered())).map((p) => `${p.x.toFixed(4)},${p.y.toFixed(4)},${p.z.toFixed(4)}`))
+
+    expect(broken.size).toBeGreaterThan(whole.size)
+  })
+
+  test('shatters the same way every time, so a creature is still itself', () => {
+    const first = vertices(generate(shattered()))
+    const second = vertices(generate(shattered()))
+
+    expect(first).toHaveLength(second.length)
+    for (let i = 0; i < first.length; i += 17) {
+      expect(first[i]!.distanceTo(second[i]!)).toBeLessThan(1e-9)
+    }
+  })
+
+  test('never produces a NaN vertex', () => {
+    for (const mesh of MESH_MODES) {
+      for (const point of vertices(generate(shattered((spec) => void (spec.body.mesh = mesh))))) {
+        expect(Number.isFinite(point.x) && Number.isFinite(point.y) && Number.isFinite(point.z), mesh).toBe(true)
+      }
+    }
+  })
+
+  test('composes with the radial mutation’s own mesh modes', () => {
+    for (const mesh of MESH_MODES) {
+      const creature = generate(shattered((spec) => void (spec.body.mesh = mesh)))
+      creature.root.updateMatrixWorld(true)
+
+      expect(new THREE.Box3().setFromObject(creature.root).isEmpty(), mesh).toBe(false)
+      expect(creature.triangleCount, mesh).toBeGreaterThan(0)
+    }
+  })
+})
+
+describe('the melted mutation', () => {
+  const melted = (edit: (spec: CreatureSpec) => void = () => {}): CreatureSpec => {
+    const spec = defaultSpec()
+    spec.body.mutation = 'melted'
+    edit(spec)
+    return spec
+  }
+
+  const box = (spec: CreatureSpec) => {
+    const creature = generate(spec)
+    creature.root.updateMatrixWorld(true)
+    return new THREE.Box3().setFromObject(creature.root)
+  }
+
+  test('keeps every triangle — a melted creature is the same surface, lower', () => {
+    expect(generate(melted()).triangleCount).toBe(generate(defaultSpec()).triangleCount)
+  })
+
+  test('slumps: shorter than it was, and wider for it', () => {
+    const upright = box(defaultSpec()).getSize(new THREE.Vector3())
+    const slumped = box(melted()).getSize(new THREE.Vector3())
+
+    expect(slumped.y).toBeLessThan(upright.y * 0.9)
+    expect(Math.max(slumped.x, slumped.z)).toBeGreaterThan(Math.max(upright.x, upright.z))
+  })
+
+  test('pools on the floor rather than draining through it', () => {
+    expect(box(melted()).min.y).toBeCloseTo(0, 1)
+  })
+
+  test('melts the same way every time', () => {
+    const first = box(melted())
+    const second = box(melted())
+
+    expect(first.min.distanceTo(second.min)).toBeLessThan(1e-9)
+    expect(first.max.distanceTo(second.max)).toBeLessThan(1e-9)
+  })
+
+  test('never produces a NaN vertex, in either mesh mode', () => {
+    for (const mesh of MESH_MODES) {
+      const creature = generate(melted((spec) => void (spec.body.mesh = mesh)))
+      creature.root.traverse((node) => {
+        const mesh3d = node as THREE.Mesh
+        if (!mesh3d.isMesh) return
+        const position = mesh3d.geometry.getAttribute('position')
+        for (let i = 0; i < position.count * 3; i++) {
+          expect(Number.isFinite(position.array[i]), mesh).toBe(true)
+        }
+      })
+    }
+  })
+})
+
+describe('every mutation', () => {
+  test('builds a creature that stands on the ground, in both mesh modes', () => {
+    for (const mutation of MUTATIONS) {
+      for (const mesh of MESH_MODES) {
+        const spec = defaultSpec()
+        spec.body.mutation = mutation
+        spec.body.mesh = mesh
+        const creature = generate(spec)
+        creature.root.updateMatrixWorld(true)
+
+        const label = `${mutation}/${mesh}`
+        const bounds = new THREE.Box3().setFromObject(creature.root)
+        expect(bounds.isEmpty(), label).toBe(false)
+        expect(bounds.min.y, label).toBeCloseTo(0, 1)
+        expect(creature.triangleCount, label).toBeGreaterThan(0)
+      }
+    }
+  })
+
+  test('leaves every joint a gait poses in place, whatever it does to the body', () => {
+    for (const mutation of MUTATIONS) {
+      const spec = defaultSpec()
+      spec.body.mutation = mutation
+      const creature = generate(spec)
+
+      for (const name of CORE_JOINTS) expect(creature.joints[name], `${mutation}/${name}`).toBeDefined()
     }
   })
 })

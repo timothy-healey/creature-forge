@@ -1,0 +1,160 @@
+import * as THREE from 'three'
+
+/**
+ * Deformations that rewrite a part's vertices after it is built.
+ *
+ * These differ from the plan mutations in `generate`: nothing here changes what
+ * parts a creature has or where they attach. They change what the surface *is* —
+ * whether it is continuous, whether it hangs where it was put, whether it is a
+ * surface at all. Because they run on each part before anything is welded, they
+ * compose with both mesh modes.
+ */
+
+/** Deterministic hash, so a creature deforms the same way on every rebuild. */
+function noise(x: number, y: number, z: number): number {
+  const value = Math.sin(x * 127.1 + y * 311.7 + z * 74.7) * 43758.5453
+  return value - Math.floor(value)
+}
+
+const EPSILON = 1e-9
+
+/**
+ * Three caches a geometry's bounds, and anything that reads them afterwards —
+ * `Box3.setFromObject`, frustum culling, the settle onto the ground — trusts the
+ * cache over the vertices. Rewriting positions without clearing it means the
+ * deformation happens and nothing downstream can see it.
+ */
+function invalidateBounds(geometry: THREE.BufferGeometry): void {
+  geometry.boundingBox = null
+  geometry.boundingSphere = null
+}
+
+/**
+ * Detaches every triangle and lets it drift: pushed out along its own normal,
+ * spun about its centre, and shrunk so a gap opens between it and its
+ * neighbours. The creature keeps its silhouette and stops being solid.
+ */
+export function shatter(geometry: THREE.BufferGeometry, amount: number): void {
+  const position = geometry.getAttribute('position') as THREE.BufferAttribute
+  const points = position.array as Float32Array
+
+  const a = new THREE.Vector3()
+  const b = new THREE.Vector3()
+  const c = new THREE.Vector3()
+  const centre = new THREE.Vector3()
+  const normal = new THREE.Vector3()
+  const edge = new THREE.Vector3()
+
+  for (let triangle = 0; triangle + 8 < points.length; triangle += 9) {
+    a.set(points[triangle]!, points[triangle + 1]!, points[triangle + 2]!)
+    b.set(points[triangle + 3]!, points[triangle + 4]!, points[triangle + 5]!)
+    c.set(points[triangle + 6]!, points[triangle + 7]!, points[triangle + 8]!)
+
+    normal.subVectors(b, a).cross(edge.subVectors(c, a))
+    if (normal.lengthSq() < EPSILON) continue
+    normal.normalize()
+
+    centre.addVectors(a, b).add(c).divideScalar(3)
+    const drift = amount * (0.3 + noise(centre.x, centre.y, centre.z))
+    const spin = (noise(centre.y, centre.z, centre.x) - 0.5) * 1.1
+
+    let slot = triangle
+    for (const vertex of [a, b, c]) {
+      vertex
+        .sub(centre)
+        .applyAxisAngle(normal, spin)
+        .multiplyScalar(0.78)
+        .add(centre)
+        .addScaledVector(normal, drift)
+      points[slot] = vertex.x
+      points[slot + 1] = vertex.y
+      points[slot + 2] = vertex.z
+      slot += 3
+    }
+  }
+
+  position.needsUpdate = true
+  geometry.computeVertexNormals()
+  invalidateBounds(geometry)
+}
+
+/**
+ * Lets the creature collapse.
+ *
+ * Height is what melts: a vertex slides down by how far above the floor it
+ * started, so the whole body sinks into itself rather than each part drooping
+ * only within its own length. What has sunk spreads where it lands, so the
+ * creature narrows at the top and pools at the base — and the feet, already at
+ * the floor, do not move at all.
+ */
+export function melt(
+  geometry: THREE.BufferGeometry,
+  toWorld: THREE.Matrix4,
+  toLocal: THREE.Matrix4,
+  options: { amount: number; scale: number; ground: number },
+): void {
+  const position = geometry.getAttribute('position') as THREE.BufferAttribute
+  const point = new THREE.Vector3()
+
+  for (let i = 0; i < position.count; i++) {
+    point.fromBufferAttribute(position, i).applyMatrix4(toWorld)
+
+    const above = Math.max(0, point.y - options.ground) / Math.max(1e-6, options.scale)
+    const sink = options.amount * above ** 1.6
+    const spread = 1 + 0.85 * Math.exp(-above * 1.1)
+
+    point.y -= sink * options.scale
+    point.x *= spread
+    point.z *= spread
+
+    if (point.y < options.ground) {
+      point.y = options.ground + (point.y - options.ground) * 0.05
+    }
+
+    point.applyMatrix4(toLocal)
+    position.setXYZ(i, point.x, point.y, point.z)
+  }
+
+  position.needsUpdate = true
+  geometry.computeVertexNormals()
+  invalidateBounds(geometry)
+}
+
+export interface DeformPart {
+  geometry: THREE.BufferGeometry
+  node: THREE.Object3D
+}
+
+export interface DeformContext {
+  /** The creature's rough size, so a deformation reads the same at any scale. */
+  scale: number
+  /** Where the floor is, in the same space the parts are measured in. */
+  ground: number
+}
+
+/**
+ * Runs a deformation over every part of a built creature. Called once the whole
+ * tree exists and its world matrices are current, so a deformation can reason
+ * about where a vertex actually is rather than only where it is in its own part.
+ */
+export function deform(
+  mutation: 'shattered' | 'melted',
+  parts: readonly DeformPart[],
+  context: DeformContext,
+): void {
+  const toLocal = new THREE.Matrix4()
+
+  for (const part of parts) {
+    if (mutation === 'shattered') {
+      shatter(part.geometry, context.scale * 0.1)
+      continue
+    }
+
+    toLocal.copy(part.node.matrixWorld).invert()
+    melt(part.geometry, part.node.matrixWorld, toLocal, {
+      amount: 0.16,
+      scale: context.scale,
+      ground: context.ground,
+    })
+  }
+}
