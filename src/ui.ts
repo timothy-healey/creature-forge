@@ -1,12 +1,18 @@
 import { GAITS, type Gait } from './animate'
 import {
+  BUILDS,
   COLOR_KEYS,
   COLOR_LABELS,
+  EAR_TYPES,
+  FRONT_LIMBS,
   HEAD_TYPES,
   HORN_COUNTS,
   LEG_TYPES,
+  RIDGE_TYPES,
+  SEGMENT_COUNTS,
   SLIDERS,
   TAIL_TYPES,
+  WING_TYPES,
   randomSpec,
   readSlider,
   writeSlider,
@@ -14,8 +20,9 @@ import {
 } from './spec'
 
 /**
- * The control panel. Builds itself from `SLIDERS` and the type lists in `spec`,
- * so a new part type or slider appears here without this file being touched.
+ * The control panel. Sliders build themselves from `SLIDERS` and every picker
+ * reads its options from the lists in `spec`, so a new part type or slider
+ * appears here without this file being touched.
  */
 
 export interface UiHandlers {
@@ -34,11 +41,27 @@ export function mountControls(panel: HTMLElement, spec: CreatureSpec, handlers: 
 
   panel.append(
     rollButton(() => {
-      const rolled = randomSpec()
+      // Detail is a viewing choice, not part of the creature — a roll keeps it.
+      const rolled = randomSpec(Math.random, spec.detail.level)
       mountControls(panel, rolled, handlers)
       handlers.onSpecChange(rolled)
     }),
     choiceGroup('Gait', GAITS, 'idle', (gait) => handlers.onGaitChange(gait)),
+    section('Detail', slidersFor('Detail', spec, changed)),
+    section('Body', [
+      choiceGroup('Build', BUILDS, spec.body.build, (build) => {
+        spec.body.build = build
+        changed()
+      }),
+      choiceGroup('Front', FRONT_LIMBS, spec.body.frontLimb, (frontLimb) => {
+        spec.body.frontLimb = frontLimb
+        changed()
+      }),
+      choiceGroup('Segments', SEGMENT_COUNTS, spec.torso.segments, (segments) => {
+        spec.torso.segments = segments
+        changed()
+      }),
+    ]),
     section('Head', [
       choiceGroup('Shape', HEAD_TYPES, spec.head.type, (type) => {
         spec.head.type = type
@@ -48,8 +71,13 @@ export function mountControls(panel: HTMLElement, spec: CreatureSpec, handlers: 
         spec.head.horns = horns
         changed()
       }),
+      choiceGroup('Ears', EAR_TYPES, spec.head.ears, (ears) => {
+        spec.head.ears = ears
+        changed()
+      }),
       ...slidersFor('Head', spec, changed),
     ]),
+    section('Neck', slidersFor('Neck', spec, changed)),
     section('Torso', slidersFor('Torso', spec, changed)),
     section('Arms', slidersFor('Arms', spec, changed)),
     section('Legs', [
@@ -60,8 +88,18 @@ export function mountControls(panel: HTMLElement, spec: CreatureSpec, handlers: 
       ...slidersFor('Legs', spec, changed),
     ]),
     section('Tail', [
-      choiceGroup('Length', TAIL_TYPES, spec.tail.type, (type) => {
+      choiceGroup('Shape', TAIL_TYPES, spec.tail.type, (type) => {
         spec.tail.type = type
+        changed()
+      }),
+    ]),
+    section('Back', [
+      choiceGroup('Ridge', RIDGE_TYPES, spec.back.ridge, (ridge) => {
+        spec.back.ridge = ridge
+        changed()
+      }),
+      choiceGroup('Wings', WING_TYPES, spec.wings.type, (type) => {
+        spec.wings.type = type
         changed()
       }),
     ]),
@@ -77,15 +115,6 @@ export function mountControls(panel: HTMLElement, spec: CreatureSpec, handlers: 
   )
 }
 
-function rollButton(onRoll: () => void): HTMLElement {
-  const button = document.createElement('button')
-  button.type = 'button'
-  button.className = 'roll'
-  button.textContent = 'Randomise'
-  button.addEventListener('click', onRoll)
-  return button
-}
-
 function slidersFor(group: string, spec: CreatureSpec, changed: () => void): HTMLElement[] {
   return SLIDERS.filter((slider) => slider.group === group).map((slider) =>
     sliderRow(slider.label, readSlider(spec, slider.path), (value) => {
@@ -93,6 +122,15 @@ function slidersFor(group: string, spec: CreatureSpec, changed: () => void): HTM
       changed()
     }),
   )
+}
+
+function rollButton(onRoll: () => void): HTMLElement {
+  const button = document.createElement('button')
+  button.type = 'button'
+  button.className = 'roll'
+  button.textContent = 'Randomise'
+  button.addEventListener('click', onRoll)
+  return button
 }
 
 function section(title: string, children: HTMLElement[]): HTMLElement {

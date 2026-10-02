@@ -188,3 +188,65 @@ export function hangDown(geometry: THREE.BufferGeometry): THREE.BufferGeometry {
   geometry.translate(0, -geometry.boundingBox!.max.y, 0)
   return geometry
 }
+
+/**
+ * A part's shape as a continuous function rather than a fixed list of rings.
+ *
+ * `t` runs 0 at the base to 1 at the far end. Because the shape is continuous,
+ * it can be sampled at any density: three rings or nine describe the same
+ * silhouette, which is what lets one slider move a creature between a 300- and a
+ * 3000-triangle version of itself without redesigning it.
+ */
+export interface Profile {
+  /** Half-width across the body. */
+  rx(t: number): number
+  /** Half-depth front to back. */
+  rz(t: number): number
+  /** Offset front to back — a drooping snout, a brow, a curved tail. */
+  dz?(t: number): number
+  /** Offset across the body. */
+  dx?(t: number): number
+  /** Twist, which stops a band's quads being planar. */
+  yaw?(t: number): number
+}
+
+/** Samples a profile into the sections a prism is built from. */
+export function sample(profile: Profile, length: number, bands: number): Section[] {
+  const steps = Math.max(1, Math.round(bands))
+  return Array.from({ length: steps + 1 }, (_, i) => {
+    const t = i / steps
+    return {
+      y: t * length,
+      rx: profile.rx(t),
+      rz: profile.rz(t),
+      dx: profile.dx?.(t) ?? 0,
+      dz: profile.dz?.(t) ?? 0,
+      yaw: profile.yaw?.(t) ?? 0,
+    }
+  })
+}
+
+/**
+ * How finely a creature is described. One slider drives both numbers: the
+ * corners around a cross-section, and the bands along a part's length.
+ */
+export interface Resolution {
+  /** Corners around a part, scaled from the count that part looks right at. */
+  sides(base: number): number
+  /** Bands along a part, from a minimum that part cannot look right below. */
+  bands(base: number): number
+  /** How many elements to repeat along a run — ridge plates, tail segments. */
+  repeats(base: number): number
+}
+
+export function resolutionFor(detail: number): Resolution {
+  const level = Math.min(1, Math.max(0, Number.isFinite(detail) ? detail : 0.5))
+  const sideScale = 0.6 + level * 1.4
+  const bandScale = 0.5 + level * 2.5
+
+  return {
+    sides: (base) => Math.max(3, Math.min(14, Math.round(base * sideScale))),
+    bands: (base) => Math.max(1, Math.min(12, Math.round(base * bandScale))),
+    repeats: (base) => Math.max(1, Math.min(16, Math.round(base * (0.6 + level * 1.2)))),
+  }
+}

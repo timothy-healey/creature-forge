@@ -14,7 +14,7 @@ const viewport = createViewport(canvas)
 
 function show(spec: CreatureSpec): void {
   const creature = generate(spec)
-  viewport.show(creature)
+  viewport.show(creature, spec.body)
   counter!.textContent = `${creature.triangleCount} tris`
 }
 

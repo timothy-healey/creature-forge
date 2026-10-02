@@ -4,32 +4,43 @@
  * `generate` promises to produce a node for every core joint; `animate` promises
  * to pose nothing else. Neither imports the other — they meet here, which is why
  * a new body part costs no animation code and a new gait costs no geometry.
+ *
+ * Limbs are named front and back rather than arm and leg. A front limb is an arm
+ * on an upright creature and a foreleg on a quadruped, and it is the same joint
+ * either way — only its rest pose and its share of the gait differ.
  */
 
 export const CORE_JOINTS = [
   'hip',
   'spine',
+  'neck',
   'head',
-  'armL',
-  'forearmL',
-  'armR',
-  'forearmR',
-  'thighL',
-  'shinL',
-  'footL',
-  'thighR',
-  'shinR',
-  'footR',
+  'frontUpperL',
+  'frontLowerL',
+  'frontFootL',
+  'frontUpperR',
+  'frontLowerR',
+  'frontFootR',
+  'backUpperL',
+  'backLowerL',
+  'backFootL',
+  'backUpperR',
+  'backLowerR',
+  'backFootR',
 ] as const
 
 export type CoreJoint = (typeof CORE_JOINTS)[number]
 
-/** Tail joints are optional — a creature may have none. */
-export const MAX_TAIL_SEGMENTS = 3
-export const TAIL_JOINTS = ['tail0', 'tail1', 'tail2'] as const
-export type TailJoint = (typeof TAIL_JOINTS)[number]
+/** Optional joints — a creature may have no tail, no ears and no wings. */
+export const TAIL_JOINTS = ['tail0', 'tail1', 'tail2', 'tail3'] as const
+export const EAR_JOINTS = ['earL', 'earR'] as const
+export const WING_JOINTS = ['wingL', 'wingR'] as const
 
-export type JointName = CoreJoint | TailJoint
+export type JointName =
+  | CoreJoint
+  | (typeof TAIL_JOINTS)[number]
+  | (typeof EAR_JOINTS)[number]
+  | (typeof WING_JOINTS)[number]
 
 /**
  * The pose a joint rests in before any animation is added on top.

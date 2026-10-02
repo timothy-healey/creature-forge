@@ -5,30 +5,55 @@
  *
  * Every slider is normalised 0..1. Mapping those to world units is `generate`'s
  * job, not the spec's — so a slider range never has to agree with a model scale.
+ *
+ * The spec separates two kinds of variation. Sliders change a creature's
+ * measurements; the enums below change its *plan* — how many limbs reach the
+ * ground, which way the spine runs, what grows out of its back. Measurements
+ * alone only ever produce bigger and smaller versions of one animal.
  */
 
-export type HeadType = 'snout' | 'beak' | 'blunt'
+export type Build = 'upright' | 'hunched' | 'quadruped'
+export type FrontLimb = 'arms' | 'forelegs'
+export type HeadType = 'snout' | 'beak' | 'blunt' | 'crest'
 export type LegType = 'digitigrade' | 'plantigrade'
-export type TailType = 'none' | 'stub' | 'long'
+export type TailType = 'none' | 'stub' | 'long' | 'club' | 'fan'
+export type RidgeType = 'none' | 'spines' | 'plates' | 'sail'
+export type EarType = 'none' | 'pointed' | 'long' | 'frill'
+export type WingType = 'none' | 'small' | 'large'
 export type HornCount = 0 | 1 | 2
+export type SegmentCount = 2 | 3 | 4 | 5
 
-export const HEAD_TYPES: readonly HeadType[] = ['snout', 'beak', 'blunt']
+export const BUILDS: readonly Build[] = ['upright', 'hunched', 'quadruped']
+export const FRONT_LIMBS: readonly FrontLimb[] = ['arms', 'forelegs']
+export const HEAD_TYPES: readonly HeadType[] = ['snout', 'beak', 'blunt', 'crest']
 export const LEG_TYPES: readonly LegType[] = ['digitigrade', 'plantigrade']
-export const TAIL_TYPES: readonly TailType[] = ['none', 'stub', 'long']
+export const TAIL_TYPES: readonly TailType[] = ['none', 'stub', 'long', 'club', 'fan']
+export const RIDGE_TYPES: readonly RidgeType[] = ['none', 'spines', 'plates', 'sail']
+export const EAR_TYPES: readonly EarType[] = ['none', 'pointed', 'long', 'frill']
+export const WING_TYPES: readonly WingType[] = ['none', 'small', 'large']
 export const HORN_COUNTS: readonly HornCount[] = [0, 1, 2]
+export const SEGMENT_COUNTS: readonly SegmentCount[] = [2, 3, 4, 5]
 
 export interface CreatureSpec {
-  head: { type: HeadType; length: number; width: number; horns: HornCount }
-  torso: { height: number; width: number; depth: number }
+  body: { build: Build; frontLimb: FrontLimb }
+  /** How finely the same shape is described. Slides a creature between eras. */
+  detail: { level: number }
+  head: { type: HeadType; length: number; width: number; horns: HornCount; ears: EarType }
+  neck: { length: number }
+  torso: { height: number; width: number; depth: number; segments: SegmentCount }
   arms: { length: number; thickness: number }
   legs: { type: LegType; length: number; thickness: number }
   tail: { type: TailType }
+  back: { ridge: RidgeType }
+  wings: { type: WingType }
   colors: { body: string; belly: string; accent: string; eye: string }
 }
 
 export type SliderPath =
+  | 'detail.level'
   | 'head.length'
   | 'head.width'
+  | 'neck.length'
   | 'torso.height'
   | 'torso.width'
   | 'torso.depth'
@@ -45,8 +70,10 @@ export interface SliderDef {
 
 /** Drives both clamping and the control panel, so the two can never disagree. */
 export const SLIDERS: readonly SliderDef[] = [
+  { path: 'detail.level', label: 'Vertices', group: 'Detail' },
   { path: 'head.length', label: 'Length', group: 'Head' },
   { path: 'head.width', label: 'Width', group: 'Head' },
+  { path: 'neck.length', label: 'Length', group: 'Neck' },
   { path: 'torso.height', label: 'Height', group: 'Torso' },
   { path: 'torso.width', label: 'Width', group: 'Torso' },
   { path: 'torso.depth', label: 'Depth', group: 'Torso' },
@@ -68,11 +95,16 @@ export const COLOR_LABELS: Record<ColorKey, string> = {
 
 export function defaultSpec(): CreatureSpec {
   return {
-    head: { type: 'snout', length: 0.5, width: 0.5, horns: 1 },
-    torso: { height: 0.5, width: 0.5, depth: 0.45 },
+    body: { build: 'upright', frontLimb: 'arms' },
+    detail: { level: 0.3 },
+    head: { type: 'snout', length: 0.5, width: 0.5, horns: 1, ears: 'none' },
+    neck: { length: 0.3 },
+    torso: { height: 0.5, width: 0.5, depth: 0.45, segments: 3 },
     arms: { length: 0.5, thickness: 0.45 },
     legs: { type: 'digitigrade', length: 0.5, thickness: 0.5 },
     tail: { type: 'long' },
+    back: { ridge: 'none' },
+    wings: { type: 'none' },
     colors: { body: '#7b4fbf', belly: '#e8c45a', accent: '#e07a2f', eye: '#1a1420' },
   }
 }
@@ -110,10 +142,16 @@ export function clampSpec(spec: CreatureSpec): CreatureSpec {
   const fallback = defaultSpec()
   const out = defaultSpec()
 
+  out.body.build = oneOf(BUILDS, spec.body?.build, fallback.body.build)
+  out.body.frontLimb = oneOf(FRONT_LIMBS, spec.body?.frontLimb, fallback.body.frontLimb)
   out.head.type = oneOf(HEAD_TYPES, spec.head?.type, fallback.head.type)
   out.head.horns = oneOf(HORN_COUNTS, spec.head?.horns, fallback.head.horns)
+  out.head.ears = oneOf(EAR_TYPES, spec.head?.ears, fallback.head.ears)
+  out.torso.segments = oneOf(SEGMENT_COUNTS, spec.torso?.segments, fallback.torso.segments)
   out.legs.type = oneOf(LEG_TYPES, spec.legs?.type, fallback.legs.type)
   out.tail.type = oneOf(TAIL_TYPES, spec.tail?.type, fallback.tail.type)
+  out.back.ridge = oneOf(RIDGE_TYPES, spec.back?.ridge, fallback.back.ridge)
+  out.wings.type = oneOf(WING_TYPES, spec.wings?.type, fallback.wings.type)
 
   for (const slider of SLIDERS) {
     writeSlider(out, slider.path, unitOr(readSlider(spec, slider.path), readSlider(fallback, slider.path)))
@@ -127,41 +165,84 @@ export function clampSpec(spec: CreatureSpec): CreatureSpec {
   return out
 }
 
-const PALETTES: readonly CreatureSpec['colors'][] = [
-  { body: '#7b4fbf', belly: '#e8c45a', accent: '#e07a2f', eye: '#1a1420' },
-  { body: '#d9622b', belly: '#f0d9a8', accent: '#6b4a2f', eye: '#241a12' },
-  { body: '#3f8f6a', belly: '#cfe3a8', accent: '#e8d24a', eye: '#10201a' },
-  { body: '#4a6fd0', belly: '#b8d4f0', accent: '#f0f0f0', eye: '#101828' },
-  { body: '#c23f5e', belly: '#f2c0a8', accent: '#2f2434', eye: '#1c1018' },
-  { body: '#8a8f99', belly: '#d8dce2', accent: '#f08a3c', eye: '#14181e' },
-  { body: '#6f3f8f', belly: '#9fd9c0', accent: '#e8e05a', eye: '#1a1024' },
-  { body: '#2f6f7f', belly: '#e0c8a0', accent: '#d94f3f', eye: '#0e1a1e' },
-]
-
 /**
  * Rolls a whole creature. Takes its randomness as an argument rather than
  * reaching for `Math.random`, so a roll can be replayed exactly.
  *
- * Sliders are biased toward their middle by averaging two rolls: a creature
- * with every proportion at an extreme is a mess, and the interesting shapes
- * live in the broad middle with one or two features pushed out.
+ * Sliders are biased toward their middle by averaging two rolls — a creature
+ * with every proportion at an extreme is a mess — and then two of them are
+ * pushed hard to an edge, because one exaggerated feature is what makes a roll
+ * memorable while nine of them is noise.
  */
-export function randomSpec(random: () => number = Math.random): CreatureSpec {
+export function randomSpec(random: () => number = Math.random, detail = defaultSpec().detail.level): CreatureSpec {
   const pick = <T>(options: readonly T[]): T => options[Math.floor(random() * options.length)] ?? options[0]!
   const biased = () => (random() + random()) / 2
+  const spec_detail = Math.min(1, Math.max(0, detail))
 
   const spec: CreatureSpec = {
-    head: { type: pick(HEAD_TYPES), length: biased(), width: biased(), horns: pick(HORN_COUNTS) },
-    torso: { height: biased(), width: biased(), depth: biased() },
+    body: { build: pick(BUILDS), frontLimb: pick(FRONT_LIMBS) },
+    detail: { level: spec_detail },
+    head: {
+      type: pick(HEAD_TYPES),
+      length: biased(),
+      width: biased(),
+      horns: pick(HORN_COUNTS),
+      ears: pick(EAR_TYPES),
+    },
+    neck: { length: biased() },
+    torso: { height: biased(), width: biased(), depth: biased(), segments: pick(SEGMENT_COUNTS) },
     arms: { length: biased(), thickness: biased() },
     legs: { type: pick(LEG_TYPES), length: biased(), thickness: biased() },
     tail: { type: pick(TAIL_TYPES) },
-    colors: { ...pick(PALETTES) },
+    back: { ridge: pick(RIDGE_TYPES) },
+    wings: { type: pick(WING_TYPES) },
+    colors: rollPalette(random),
   }
 
-  // One feature pushed to an extreme is what makes a roll memorable.
-  const exaggerated = pick(SLIDERS)
-  writeSlider(spec, exaggerated.path, random() < 0.5 ? random() * 0.18 : 0.82 + random() * 0.18)
+  const proportions = SLIDERS.filter((slider) => slider.path !== 'detail.level')
+  for (let i = 0; i < 2; i++) {
+    const exaggerated = pick(proportions)
+    writeSlider(spec, exaggerated.path, random() < 0.5 ? random() * 0.16 : 0.84 + random() * 0.16)
+  }
 
   return spec
+}
+
+/**
+ * Builds a palette rather than picking one, so no two rolls repeat.
+ *
+ * Two rules do the work. The belly is lighter than the body, which is how real
+ * animals are countershaded and reads as "creature" rather than "object". The
+ * accent sits across the wheel from the body, so horns and claws separate from
+ * the hide instead of blending into it.
+ */
+function rollPalette(random: () => number): CreatureSpec['colors'] {
+  const hue = random() * 360
+  const saturation = 0.42 + random() * 0.38
+  const lightness = 0.34 + random() * 0.2
+
+  return {
+    body: hslToHex(hue, saturation, lightness),
+    belly: hslToHex(
+      wrapHue(hue + (random() * 50 - 25)),
+      saturation * (0.4 + random() * 0.25),
+      Math.min(0.9, lightness + 0.26 + random() * 0.1),
+    ),
+    accent: hslToHex(wrapHue(hue + 150 + random() * 60), 0.6 + random() * 0.3, 0.46 + random() * 0.16),
+    eye: hslToHex(wrapHue(hue + 180), 0.3 + random() * 0.3, lightness * 0.28),
+  }
+}
+
+const wrapHue = (hue: number) => ((hue % 360) + 360) % 360
+
+function hslToHex(hue: number, saturation: number, lightness: number): string {
+  const chroma = saturation * Math.min(lightness, 1 - lightness)
+  const channel = (offset: number): string => {
+    const k = (offset + hue / 30) % 12
+    const value = lightness - chroma * Math.max(-1, Math.min(k - 3, 9 - k, 1))
+    return Math.round(255 * value)
+      .toString(16)
+      .padStart(2, '0')
+  }
+  return `#${channel(0)}${channel(8)}${channel(4)}`
 }

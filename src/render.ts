@@ -1,6 +1,6 @@
 import * as THREE from 'three'
 import { OrbitControls } from 'three/examples/jsm/controls/OrbitControls.js'
-import { applyPose, poseAt, type Gait } from './animate'
+import { applyPose, poseAt, type Gait, type Stance } from './animate'
 import type { Creature } from './generate'
 
 /**
@@ -20,7 +20,7 @@ const SNAP_GRID = new THREE.Vector2(160, 120)
 const BACKGROUND = new THREE.Color('#1b1726')
 
 export interface Viewport {
-  show(creature: Creature): void
+  show(creature: Creature, stance: Stance): void
   setGait(gait: Gait): void
   dispose(): void
 }
@@ -58,11 +58,13 @@ export function createViewport(canvas: HTMLCanvasElement): Viewport {
   scene.add(new THREE.Mesh(groundGeometry, groundMaterial))
 
   let creature: Creature | null = null
+  let stance: Stance = { build: 'upright', frontLimb: 'arms' }
   let gait: Gait = 'idle'
   let running = true
   const clock = new THREE.Clock()
 
-  function show(next: Creature): void {
+  function show(next: Creature, nextStance: Stance): void {
+    stance = nextStance
     if (creature) {
       scene.remove(creature.root)
       creature.dispose()
@@ -97,7 +99,7 @@ export function createViewport(canvas: HTMLCanvasElement): Viewport {
     controls.update()
 
     if (creature) {
-      applyPose(creature.joints, creature.rest, poseAt(clock.getElapsedTime(), gait))
+      applyPose(creature.joints, creature.rest, poseAt(clock.getElapsedTime(), gait, stance))
     }
     renderer.render(scene, camera)
   }

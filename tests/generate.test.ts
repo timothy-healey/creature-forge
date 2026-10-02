@@ -104,8 +104,8 @@ describe('generate', () => {
   test('mirrors the limbs across the centre line', () => {
     const { joints } = generate(defaultSpec())
 
-    expect(joints.thighL!.position.x).toBeCloseTo(-joints.thighR!.position.x)
-    expect(joints.armL!.position.x).toBeCloseTo(-joints.armR!.position.x)
+    expect(joints.backUpperL!.position.x).toBeCloseTo(-joints.backUpperR!.position.x)
+    expect(joints.frontUpperL!.position.x).toBeCloseTo(-joints.frontUpperR!.position.x)
   })
 
   test('stands on the ground rather than floating or sinking', () => {

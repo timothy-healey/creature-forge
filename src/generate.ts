@@ -1,6 +1,7 @@
 import * as THREE from 'three'
-import { hangDown, pointBackward, pointForward, prism } from './geometry'
+import { resolutionFor } from './geometry'
 import { type RestMap, type RestPose, rest } from './joints'
+import * as parts from './parts'
 import { type CreatureSpec, clampSpec } from './spec'
 
 /**
@@ -11,9 +12,12 @@ import { type CreatureSpec, clampSpec } from './spec'
  * nodes. That is how characters of this era were actually built — the seams at
  * the joints are the look, not a compromise.
  *
- * Every part is a prism of stacked cross-sections. Limbs taper through a muscle
- * bulge rather than running straight, skulls are wedges, and horns, beaks and
- * tails end in a real point, so the silhouette is faceted rather than boxy.
+ * The spine's pitch is the whole body plan. At zero it is an upright biped; at
+ * 1.3 radians it is a quadruped with its back level, and the neck and head
+ * counter-rotate so the creature still looks where it is going. Front limbs are
+ * either arms, which hang free at whatever length the slider says, or forelegs,
+ * whose length is solved so the foot reaches the same ground the hind feet
+ * stand on.
  */
 
 export interface Creature {
@@ -25,56 +29,65 @@ export interface Creature {
   dispose(): void
 }
 
-/** Cross-section counts, part by part. Lower is sharper and more angular. */
-const SIDES = {
-  torso: 6,
-  neck: 5,
-  skull: 6,
-  snout: 5,
-  beak: 4,
-  muzzle: 6,
-  horn: 5,
-  limb: 5,
-  foot: 5,
-  tail: 5,
-  eye: 4,
-} as const
-
-const lerp = (a: number, b: number, t: number) => a + (b - a) * t
+/** Spine pitch, in radians, per build. This is what makes a quadruped. */
+const PITCH: Record<CreatureSpec['body']['build'], number> = {
+  upright: 0,
+  hunched: 0.62,
+  quadruped: 1.3,
+}
 
 const TAIL_SEGMENTS: Record<CreatureSpec['tail']['type'], number> = {
   none: 0,
   stub: 1,
   long: 3,
+  club: 3,
+  fan: 3,
 }
+
+const SHOULDER_ALONG = 0.82
+
+const lerp = (a: number, b: number, t: number) => a + (b - a) * t
 
 export function generate(input: CreatureSpec): Creature {
   const spec = clampSpec(input)
+  const res = resolutionFor(spec.detail.level)
+  const pitch = PITCH[spec.body.build]
+  const planted = spec.body.frontLimb === 'forelegs'
 
-  const body = new THREE.Color(spec.colors.body)
-  const belly = new THREE.Color(spec.colors.belly)
-  const accent = new THREE.Color(spec.colors.accent)
-  const eye = new THREE.Color(spec.colors.eye)
+  const palette: parts.Palette = {
+    body: new THREE.Color(spec.colors.body),
+    belly: new THREE.Color(spec.colors.belly),
+    accent: new THREE.Color(spec.colors.accent),
+    eye: new THREE.Color(spec.colors.eye),
+  }
 
-  const torsoH = lerp(0.34, 0.74, spec.torso.height)
   const torsoW = lerp(0.26, 0.58, spec.torso.width)
   const torsoD = lerp(0.2, 0.48, spec.torso.depth)
+  const dims: parts.Dims = {
+    torsoW,
+    torsoD,
+    spineLength: lerp(0.34, 0.74, spec.torso.height) * (0.62 + spec.torso.segments * 0.17),
+    neckLen: lerp(0.04, 0.52, spec.neck.length),
+    headW: lerp(0.19, 0.44, spec.head.width),
+    headH: 0,
+    headD: 0,
+    headLen: lerp(0.14, 0.44, spec.head.length),
+    legThick: lerp(0.07, 0.21, spec.legs.thickness),
+    armThick: lerp(0.055, 0.17, spec.arms.thickness),
+  }
+  dims.headH = dims.headW * 0.82
+  dims.headD = dims.headW * 0.86
+
   const legLen = lerp(0.28, 0.86, spec.legs.length)
-  const legThick = lerp(0.07, 0.21, spec.legs.thickness)
   const armLen = lerp(0.24, 0.68, spec.arms.length)
-  const armThick = lerp(0.055, 0.17, spec.arms.thickness)
-  const headLen = lerp(0.14, 0.44, spec.head.length)
-  const headW = lerp(0.19, 0.44, spec.head.width)
-  const headH = headW * 0.82
-  const headD = headW * 0.86
-  const neckLen = 0.05 + torsoW * 0.12
+  const footHeight = Math.max(0.05, dims.legThick * 0.42)
+  const digitigrade = spec.legs.type === 'digitigrade'
 
   const root = new THREE.Group()
   root.name = 'creature'
   const joints: Record<string, THREE.Object3D> = {}
   const restMap: RestMap = {}
   const geometries: THREE.BufferGeometry[] = []
-
   const material = new THREE.MeshLambertMaterial({ vertexColors: true, flatShading: true })
 
   function joint(name: string, parent: THREE.Object3D, at: THREE.Vector3Like, pose: RestPose): THREE.Group {
@@ -88,304 +101,191 @@ export function generate(input: CreatureSpec): Creature {
     return group
   }
 
-  function part(
-    name: string,
-    parent: THREE.Object3D,
-    geometry: THREE.BufferGeometry,
-    at?: THREE.Vector3Like,
-  ): THREE.Mesh {
-    const mesh = new THREE.Mesh(geometry, material)
-    mesh.name = name
-    if (at) mesh.position.set(at.x, at.y, at.z)
+  function attach(parent: THREE.Object3D, placed: parts.Placed): THREE.Mesh {
+    const mesh = new THREE.Mesh(placed.geometry, material)
+    mesh.name = placed.name
+    if (placed.position) mesh.position.set(placed.position.x, placed.position.y, placed.position.z)
+    if (placed.rotation) mesh.rotation.set(placed.rotation.x, placed.rotation.y, placed.rotation.z)
     parent.add(mesh)
-    geometries.push(geometry)
+    geometries.push(placed.geometry)
     return mesh
   }
 
-  /** A limb segment: thin at the far end, bulging mid-way, square at the joint. */
-  function limb(length: number, near: number, bulge: number, far: number): THREE.BufferGeometry {
-    return hangDown(
-      prism({
-        sides: SIDES.limb,
-        sections: [
-          { y: 0, rx: far, rz: far },
-          { y: length * 0.55, rx: bulge, rz: bulge * 0.94, yaw: 0.16 },
-          { y: length, rx: near, rz: near },
-        ],
-        colors: { side: body },
-      }),
-    )
-  }
+  const mesh = (name: string, parent: THREE.Object3D, geometry: THREE.BufferGeometry, at?: THREE.Vector3Like) =>
+    attach(parent, { name, geometry, ...(at ? { position: at } : {}) })
 
-  // ─── spine ────────────────────────────────────────────────────────────────
+  // ─── spine, pitched by build ──────────────────────────────────────────────
   const hip = joint('hip', root, { x: 0, y: legLen, z: 0 }, rest())
-  const spine = joint('spine', hip, { x: 0, y: 0, z: 0 }, rest())
+  const spine = joint('spine', hip, { x: 0, y: 0, z: 0 }, rest(pitch))
 
-  part(
-    'torso',
-    spine,
-    prism({
-      sides: SIDES.torso,
-      sections: [
-        { y: 0, rx: torsoW * 0.4, rz: torsoD * 0.42 },
-        { y: torsoH * 0.32, rx: torsoW * 0.46, rz: torsoD * 0.47, yaw: 0.08 },
-        { y: torsoH * 0.74, rx: torsoW * 0.5, rz: torsoD * 0.5, dz: torsoD * 0.02 },
-        { y: torsoH, rx: torsoW * 0.4, rz: torsoD * 0.4 },
-      ],
-      colors: { side: body, belly, cap: belly },
-      bellyWidth: 0.95,
-    }),
-  )
+  attach(spine, parts.torso(dims, palette, res, spec.torso.segments))
 
-  part(
-    'neck',
-    spine,
-    prism({
-      sides: SIDES.neck,
-      sections: [
-        { y: 0, rx: torsoW * 0.22, rz: torsoD * 0.23 },
-        { y: neckLen, rx: torsoW * 0.18, rz: torsoD * 0.2, dz: torsoD * 0.03 },
-      ],
-      colors: { side: body, belly },
-    }),
-    { x: 0, y: torsoH, z: 0 },
-  )
+  // ─── back legs ────────────────────────────────────────────────────────────
+  const thighLen = legLen * 0.52
+  const shinLen = legLen * 0.4
 
-  // ─── head ─────────────────────────────────────────────────────────────────
-  const head = joint('head', spine, { x: 0, y: torsoH + neckLen, z: 0 }, rest())
-
-  part(
-    'skull',
-    head,
-    prism({
-      sides: SIDES.skull,
-      sections: [
-        { y: 0, rx: headW * 0.37, rz: headD * 0.39 },
-        { y: headH * 0.46, rx: headW * 0.5, rz: headD * 0.5, dz: headD * 0.04 },
-        { y: headH, rx: headW * 0.38, rz: headD * 0.36, dz: -headD * 0.03 },
-      ],
-      colors: { side: body, belly, cap: body },
-      bellyWidth: 0.6,
-    }),
-  )
-
-  buildFace(head, spec.head.type)
-  buildEyes(head)
-  buildHorns(head, spec.head.horns)
-
-  function buildFace(parent: THREE.Object3D, type: CreatureSpec['head']['type']): void {
-    const front = headD * 0.34
-
-    if (type === 'snout') {
-      part(
-        'snout',
-        parent,
-        pointForward(
-          prism({
-            sides: SIDES.snout,
-            sections: [
-              { y: 0, rx: headW * 0.34, rz: headH * 0.28 },
-              { y: headLen * 0.55, rx: headW * 0.28, rz: headH * 0.21, dz: headH * 0.04 },
-              { y: headLen, rx: headW * 0.2, rz: headH * 0.15, dz: headH * 0.08 },
-            ],
-            colors: { side: body, belly, cap: belly },
-          }),
-        ),
-        { x: 0, y: headH * 0.38, z: front },
-      )
-      return
-    }
-
-    if (type === 'beak') {
-      part(
-        'beak',
-        parent,
-        pointForward(
-          prism({
-            sides: SIDES.beak,
-            sections: [
-              { y: 0, rx: headW * 0.27, rz: headH * 0.23 },
-              { y: headLen * 0.5, rx: headW * 0.17, rz: headH * 0.12, dz: headH * 0.08 },
-              { y: headLen * 1.3, rx: 0, rz: 0, dz: headH * 0.16 },
-            ],
-            colors: { side: accent },
-            tip: 'top',
-          }),
-        ),
-        { x: 0, y: headH * 0.46, z: front },
-      )
-      return
-    }
-
-    part(
-      'muzzle',
-      parent,
-      pointForward(
-        prism({
-          sides: SIDES.muzzle,
-          sections: [
-            { y: 0, rx: headW * 0.42, rz: headH * 0.32 },
-            { y: headLen * 0.52, rx: headW * 0.38, rz: headH * 0.26, dz: headH * 0.04 },
-          ],
-          colors: { side: body, belly, cap: belly },
-        }),
-      ),
-      { x: 0, y: headH * 0.32, z: front },
+  for (const side of [-1, 1]) {
+    const suffix = side < 0 ? 'L' : 'R'
+    const upper = joint(
+      `backUpper${suffix}`,
+      hip,
+      { x: side * dims.legThick * 1.05, y: 0, z: 0 },
+      rest(digitigrade ? 0.52 : 0.04),
     )
-  }
+    mesh(
+      `backThigh${suffix}`,
+      upper,
+      parts.limb(palette, res, thighLen, dims.legThick * 0.58, dims.legThick * 0.64, dims.legThick * 0.44),
+    )
 
-  function buildEyes(parent: THREE.Object3D): void {
-    const size = Math.max(0.03, headW * 0.11)
-    for (const side of [-1, 1]) {
-      part(
-        side < 0 ? 'eyeL' : 'eyeR',
-        parent,
-        pointForward(
-          prism({
-            sides: SIDES.eye,
-            sections: [
-              { y: 0, rx: size, rz: size * 0.72 },
-              { y: size * 0.9, rx: size * 0.72, rz: size * 0.5 },
-            ],
-            colors: { side: eye },
-          }),
-        ),
-        { x: side * headW * 0.27, y: headH * 0.6, z: headD * 0.38 },
-      )
-    }
-  }
+    const lower = joint(`backLower${suffix}`, upper, { x: 0, y: -thighLen, z: 0 }, rest(digitigrade ? -1.0 : -0.08))
+    mesh(
+      `backShin${suffix}`,
+      lower,
+      parts.limb(palette, res, shinLen, dims.legThick * 0.46, dims.legThick * 0.5, dims.legThick * 0.34),
+    )
 
-  function buildHorns(parent: THREE.Object3D, count: number): void {
-    if (count === 0) return
-    const length = 0.12 + headW * 0.45
-    const thickness = headW * 0.1
-    const offsets = count === 1 ? [0] : [-headW * 0.26, headW * 0.26]
-
-    offsets.forEach((x, index) => {
-      const mesh = part(
-        `horn${index}`,
-        parent,
-        prism({
-          sides: SIDES.horn,
-          sections: [
-            { y: 0, rx: thickness, rz: thickness },
-            { y: length * 0.42, rx: thickness * 0.62, rz: thickness * 0.62, yaw: 0.3 },
-            { y: length, rx: 0, rz: 0 },
-          ],
-          colors: { side: accent },
-          tip: 'top',
-        }),
-        { x, y: headH * 0.88, z: -headD * 0.06 },
-      )
-      mesh.rotation.x = -0.45
-      mesh.rotation.z = -x * 1.6
+    const ankle = joint(`backFoot${suffix}`, lower, { x: 0, y: -shinLen, z: 0 }, rest(digitigrade ? 0.48 : 0.04))
+    mesh(`backFoot${suffix}Mesh`, ankle, parts.foot(dims, palette, res, footHeight), {
+      x: 0,
+      y: -footHeight * 0.5,
+      z: -dims.legThick * 0.45,
     })
   }
 
-  // ─── arms ─────────────────────────────────────────────────────────────────
-  const upperArm = armLen * 0.52
-  const foreArm = armLen * 0.48
-
-  for (const side of [-1, 1]) {
-    const suffix = side < 0 ? 'L' : 'R'
-    const shoulder = joint(
-      `arm${suffix}`,
+  // ─── shoulders, placed before their limbs are sized ───────────────────────
+  const shoulders = [-1, 1].map((side) =>
+    joint(
+      `frontUpper${side < 0 ? 'L' : 'R'}`,
       spine,
-      { x: side * (torsoW * 0.46), y: torsoH * 0.8, z: 0 },
-      rest(-0.08, 0, side * 0.16),
-    )
-    part(
-      `upperArm${suffix}`,
+      { x: side * torsoW * 0.46, y: dims.spineLength * SHOULDER_ALONG, z: 0 },
+      planted ? rest(-pitch, 0, side * 0.06) : rest(-0.08 - pitch * 0.3, 0, side * 0.16),
+    ),
+  )
+
+  root.updateMatrixWorld(true)
+  const standing = new THREE.Box3()
+  for (const suffix of ['L', 'R']) standing.expandByObject(joints[`backFoot${suffix}`]!)
+  const ground = Number.isFinite(standing.min.y) ? standing.min.y : 0
+  const shoulderHeight = shoulders[0]!.getWorldPosition(new THREE.Vector3()).y
+
+  // A foreleg is as long as the gap between its shoulder and the floor.
+  const frontLen = planted ? Math.max(0.08, shoulderHeight - ground - footHeight) : armLen
+  const frontUpperLen = frontLen * 0.52
+  const frontLowerLen = frontLen * 0.48
+  const frontThick = planted ? dims.legThick * 0.92 : dims.armThick
+
+  shoulders.forEach((shoulder, index) => {
+    const suffix = index === 0 ? 'L' : 'R'
+    mesh(
+      `frontUpper${suffix}Mesh`,
       shoulder,
-      limb(upperArm, armThick * 0.56, armThick * 0.6, armThick * 0.42),
+      parts.limb(palette, res, frontUpperLen, frontThick * 0.56, frontThick * 0.6, frontThick * 0.44),
     )
 
-    const elbow = joint(`forearm${suffix}`, shoulder, { x: 0, y: -upperArm, z: 0 }, rest(0.2))
-    part(`foreArm${suffix}`, elbow, limb(foreArm, armThick * 0.44, armThick * 0.46, armThick * 0.34))
-
-    part(
-      `hand${suffix}`,
-      elbow,
-      hangDown(
-        prism({
-          sides: SIDES.limb,
-          sections: [
-            { y: 0, rx: armThick * 0.5, rz: armThick * 0.56 },
-            { y: armThick * 0.85, rx: armThick * 0.42, rz: armThick * 0.46 },
-          ],
-          colors: { side: accent },
-        }),
-      ),
-      { x: 0, y: -foreArm, z: 0 },
+    const lower = joint(`frontLower${suffix}`, shoulder, { x: 0, y: -frontUpperLen, z: 0 }, rest(planted ? 0.12 : 0.2))
+    mesh(
+      `frontLower${suffix}Mesh`,
+      lower,
+      parts.limb(palette, res, frontLowerLen, frontThick * 0.46, frontThick * 0.48, frontThick * 0.34),
     )
+
+    const end = joint(`frontFoot${suffix}`, lower, { x: 0, y: -frontLowerLen, z: 0 }, rest(planted ? 0.04 : 0))
+    if (planted) {
+      mesh(`frontFoot${suffix}Mesh`, end, parts.foot(dims, palette, res, footHeight * 0.85), {
+        x: 0,
+        y: -footHeight * 0.42,
+        z: -dims.legThick * 0.4,
+      })
+    } else {
+      mesh(`hand${suffix}`, end, parts.hand(palette, res, frontThick))
+    }
+  })
+
+  // ─── neck and head, counter-rotated against the pitch ─────────────────────
+  const neck = joint('neck', spine, { x: 0, y: dims.spineLength, z: 0 }, rest(-pitch * 0.5))
+  attach(neck, parts.neck(dims, palette, res))
+
+  const head = joint('head', neck, { x: 0, y: dims.neckLen, z: 0 }, rest(-pitch * 0.45))
+  attach(head, parts.skull(dims, palette, res))
+  for (const placed of parts.face(dims, palette, res, spec.head.type)) attach(head, placed)
+  for (const placed of parts.eyes(dims, palette, res)) attach(head, placed)
+  for (const placed of parts.horns(dims, palette, res, spec.head.horns)) attach(head, placed)
+
+  const earShape = parts.ear(dims, palette, res, spec.head.ears)
+  if (earShape) {
+    const sweeps: Record<string, readonly [number, number]> = {
+      pointed: [-0.25, 0.45],
+      long: [0.35, 0.8],
+      frill: [0, 1.3],
+    }
+    const sweep = sweeps[spec.head.ears] ?? ([0, 0.5] as const)
+    for (const side of [-1, 1]) {
+      const node = joint(
+        side < 0 ? 'earL' : 'earR',
+        head,
+        { x: side * dims.headW * 0.3, y: dims.headH * 0.7, z: -dims.headD * 0.1 },
+        rest(sweep[0], 0, side * sweep[1]),
+      )
+      mesh('ear', node, side < 0 ? earShape.geometry : earShape.geometry.clone())
+    }
   }
 
-  // ─── legs ─────────────────────────────────────────────────────────────────
-  const thighLen = legLen * 0.52
-  const shinLen = legLen * 0.4
-  const footHeight = Math.max(0.05, legThick * 0.42)
-  const footLen = legThick * 2.2
-  const digitigrade = spec.legs.type === 'digitigrade'
-
-  for (const side of [-1, 1]) {
-    const suffix = side < 0 ? 'L' : 'R'
-    const hipJoint = joint(
-      `thigh${suffix}`,
-      hip,
-      { x: side * legThick * 1.05, y: 0, z: 0 },
-      rest(digitigrade ? 0.52 : 0.04),
-    )
-    part(`thigh${suffix}Mesh`, hipJoint, limb(thighLen, legThick * 0.58, legThick * 0.64, legThick * 0.44))
-
-    const knee = joint(`shin${suffix}`, hipJoint, { x: 0, y: -thighLen, z: 0 }, rest(digitigrade ? -1.0 : -0.08))
-    part(`shin${suffix}Mesh`, knee, limb(shinLen, legThick * 0.46, legThick * 0.5, legThick * 0.34))
-
-    const ankle = joint(`foot${suffix}`, knee, { x: 0, y: -shinLen, z: 0 }, rest(digitigrade ? 0.48 : 0.04))
-    part(
-      `foot${suffix}Mesh`,
-      ankle,
-      pointForward(
-        prism({
-          sides: SIDES.foot,
-          sections: [
-            { y: 0, rx: legThick * 0.52, rz: footHeight * 0.5 },
-            { y: footLen * 0.68, rx: legThick * 0.5, rz: footHeight * 0.44, dz: -footHeight * 0.08 },
-            { y: footLen, rx: legThick * 0.34, rz: footHeight * 0.26, dz: -footHeight * 0.2 },
-          ],
-          colors: { side: body, cap: accent },
-        }),
-      ),
-      { x: 0, y: -footHeight * 0.5, z: -legThick * 0.45 },
-    )
+  // ─── back ridge, following the line of the back ───────────────────────────
+  if (spec.back.ridge !== 'none') {
+    const profile = parts.torsoProfile(dims, spec.torso.segments)
+    const count = res.repeats(spec.torso.segments * 2.2)
+    for (let i = 0; i < count; i++) {
+      const along = 0.12 + (i / Math.max(1, count - 1)) * 0.82
+      const geometry = parts.ridgeElement(dims, palette, res, spec.back.ridge, along)
+      if (geometry) {
+        mesh(`ridge${i}`, spine, geometry, { x: 0, y: along * dims.spineLength, z: -profile.rz(along) * 0.82 })
+      }
+    }
   }
 
-  // ─── tail ─────────────────────────────────────────────────────────────────
+  // ─── wings ────────────────────────────────────────────────────────────────
+  if (spec.wings.type !== 'none') {
+    for (const side of [-1, 1]) {
+      const node = joint(
+        side < 0 ? 'wingL' : 'wingR',
+        spine,
+        { x: side * torsoW * 0.38, y: dims.spineLength * 0.7, z: -torsoD * 0.22 },
+        rest(-0.55, 0, side * 1.05),
+      )
+      for (const placed of parts.wing(dims, palette, res, spec.wings.type)) {
+        attach(node, {
+          ...placed,
+          geometry: placed.geometry.clone(),
+          ...(placed.position ? { position: { ...placed.position, x: side * placed.position.x } } : {}),
+        })
+      }
+    }
+  }
+
+  // ─── tail, hung off the pelvis so the spine's pitch never swings it ───────
   const segments = TAIL_SEGMENTS[spec.tail.type]
   const segmentLength = (0.1 + torsoD * 0.42) * (segments > 1 ? 1 : 0.8)
-  let tailParent: THREE.Object3D = spine
-  let tailAt = { x: 0, y: torsoH * 0.22, z: -torsoD * 0.38 }
+  const tailLift = { upright: -0.12, hunched: 0.3, quadruped: 0.16 }[spec.body.build]
+  let tailParent: THREE.Object3D = hip
+  let tailAt: THREE.Vector3Like = { x: 0, y: torsoD * 0.12, z: -torsoD * 0.34 }
 
   for (let index = 0; index < segments; index++) {
     const taper = (step: number) => torsoW * 0.2 * (1 - (index + step) / (segments + 0.9))
     const isLast = index === segments - 1
-    const node = joint(`tail${index}`, tailParent, tailAt, rest(index === 0 ? 0.3 : -0.2))
+    const pointed = isLast && (spec.tail.type === 'long' || spec.tail.type === 'stub')
+    const node = joint(`tail${index}`, tailParent, tailAt, rest(index === 0 ? tailLift : -0.16))
 
-    part(
+    mesh(
       `tail${index}Mesh`,
       node,
-      pointBackward(
-        prism({
-          sides: SIDES.tail,
-          sections: [
-            { y: 0, rx: taper(0), rz: taper(0) },
-            { y: segmentLength * 0.5, rx: taper(0.5), rz: taper(0.5), yaw: 0.2 },
-            { y: segmentLength, rx: isLast ? 0 : taper(1), rz: isLast ? 0 : taper(1) },
-          ],
-          colors: { side: body, belly, cap: body },
-          ...(isLast ? { tip: 'top' as const } : {}),
-        }),
-      ),
+      parts.tailSegment(palette, res, segmentLength, taper(0), taper(1), pointed),
     )
+
+    if (isLast) {
+      const tip = parts.tailTip(palette, res, spec.tail.type, Math.max(0.02, taper(1)))
+      if (tip) mesh('tailTip', node, tip, { x: 0, y: 0, z: -segmentLength })
+    }
 
     tailParent = node
     tailAt = { x: 0, y: 0, z: -segmentLength }
@@ -399,9 +299,9 @@ export function generate(input: CreatureSpec): Creature {
 
   let triangleCount = 0
   root.traverse((node) => {
-    const mesh = node as THREE.Mesh
-    if (!mesh.isMesh) return
-    triangleCount += mesh.geometry.getAttribute('position').count / 3
+    const candidate = node as THREE.Mesh
+    if (!candidate.isMesh) return
+    triangleCount += candidate.geometry.getAttribute('position').count / 3
   })
 
   return {
