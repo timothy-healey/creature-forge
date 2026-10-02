@@ -885,3 +885,98 @@ describe('the lattice mutation', () => {
     expect(fine).toBeGreaterThan(coarse * 2)
   })
 })
+
+describe('the flattened mutation', () => {
+  const cutout = (edit: (spec: CreatureSpec) => void = () => {}): CreatureSpec => {
+    const spec = defaultSpec()
+    spec.body.mutation = 'flattened'
+    edit(spec)
+    return spec
+  }
+
+  test('keeps every triangle and loses a dimension', () => {
+    // Measured on a part: the whole body's width is set by how far apart the
+    // limbs are, and pressing a part flat does not move it.
+    const thickness = (spec: CreatureSpec) => {
+      let width = 0
+      generate(spec).root.traverse((node) => {
+        const mesh = node as THREE.Mesh
+        if (!mesh.isMesh || mesh.name !== 'torso') return
+        mesh.geometry.computeBoundingBox()
+        width = mesh.geometry.boundingBox!.getSize(new THREE.Vector3()).x
+      })
+      return width
+    }
+
+    expect(generate(cutout()).triangleCount).toBe(generate(defaultSpec()).triangleCount)
+    expect(thickness(cutout())).toBeLessThan(thickness(defaultSpec()) * 0.2)
+  })
+
+  test('keeps the height and depth it had, so only the width is lost', () => {
+    const solid = generate(defaultSpec())
+    const paper = generate(cutout())
+    solid.root.updateMatrixWorld(true)
+    paper.root.updateMatrixWorld(true)
+
+    const a = new THREE.Box3().setFromObject(solid.root).getSize(new THREE.Vector3())
+    const b = new THREE.Box3().setFromObject(paper.root).getSize(new THREE.Vector3())
+
+    expect(Math.abs(b.y - a.y) / a.y).toBeLessThan(0.1)
+    expect(Math.abs(b.z - a.z) / a.z).toBeLessThan(0.1)
+  })
+
+  test('presses each part flat where it stands, not onto one plane', () => {
+    const paper = generate(cutout())
+    paper.root.updateMatrixWorld(true)
+
+    const left = paper.joints.backUpperL!.getWorldPosition(new THREE.Vector3())
+    const right = paper.joints.backUpperR!.getWorldPosition(new THREE.Vector3())
+
+    expect(Math.abs(left.x - right.x)).toBeGreaterThan(0.05)
+  })
+})
+
+describe('the coiled mutation', () => {
+  const curled = (edit: (spec: CreatureSpec) => void = () => {}): CreatureSpec => {
+    const spec = defaultSpec()
+    spec.body.mutation = 'coiled'
+    edit(spec)
+    return spec
+  }
+
+  const bodyJoints = (creature: ReturnType<typeof generate>) =>
+    Object.keys(creature.joints).filter((name) => /^body\d+$/.test(name))
+
+  test('builds a longer chain than a segmented body does', () => {
+    expect(bodyJoints(generate(curled())).length).toBeGreaterThan(
+      bodyJoints(generate({ ...defaultSpec(), body: { ...defaultSpec().body, mutation: 'segmented' } })).length,
+    )
+  })
+
+  test('curls: the far end of the chain comes back round toward the near end', () => {
+    const creature = generate(curled())
+    creature.root.updateMatrixWorld(true)
+
+    const first = creature.joints.body0!.getWorldPosition(new THREE.Vector3())
+    const last = creature.joints[`body${bodyJoints(creature).length - 1}`]!.getWorldPosition(new THREE.Vector3())
+
+    const straightLine = bodyJoints(creature).length * 0.1
+    expect(first.distanceTo(last)).toBeLessThan(straightLine)
+  })
+
+  test('keeps its limbs under it rather than growing a pair per coil', () => {
+    const creature = generate(curled())
+    const feet = Object.keys(creature.joints).filter((name) => name.includes('Foot'))
+
+    expect(feet).toHaveLength(4)
+  })
+
+  test('stands on the ground with its head somewhere above it', () => {
+    const creature = generate(curled())
+    creature.root.updateMatrixWorld(true)
+
+    const bounds = new THREE.Box3().setFromObject(creature.root)
+    expect(bounds.min.y).toBeCloseTo(0, 1)
+    expect(creature.joints.head!.getWorldPosition(new THREE.Vector3()).y).toBeGreaterThan(0)
+  })
+})

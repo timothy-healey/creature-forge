@@ -39,6 +39,8 @@ export type Mutation =
   | 'inverted'
   | 'inflated'
   | 'lattice'
+  | 'flattened'
+  | 'coiled'
 export type FrontLimb = 'arms' | 'forelegs'
 export type HeadType = 'snout' | 'beak' | 'blunt' | 'crest'
 export type LegType = 'digitigrade' | 'plantigrade'
@@ -66,6 +68,8 @@ export const MUTATIONS: readonly Mutation[] = [
   'inverted',
   'inflated',
   'lattice',
+  'flattened',
+  'coiled',
 ]
 export const FRONT_LIMBS: readonly FrontLimb[] = ['arms', 'forelegs']
 export const HEAD_TYPES: readonly HeadType[] = ['snout', 'beak', 'blunt', 'crest']

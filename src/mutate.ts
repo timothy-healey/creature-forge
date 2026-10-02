@@ -145,6 +145,7 @@ export type Deformation =
   | 'inverted'
   | 'inflated'
   | 'lattice'
+  | 'flattened'
 
 export const DEFORMATIONS: readonly Deformation[] = [
   'shattered',
@@ -154,6 +155,7 @@ export const DEFORMATIONS: readonly Deformation[] = [
   'inverted',
   'inflated',
   'lattice',
+  'flattened',
 ]
 
 export function deform(
@@ -182,6 +184,10 @@ export function deform(
     }
     if (mutation === 'lattice') {
       latticeOf(part.geometry, context.scale * 0.022)
+      continue
+    }
+    if (mutation === 'flattened') {
+      flatten(part.geometry, 0.07)
       continue
     }
 
@@ -492,6 +498,22 @@ export function latticeOf(geometry: THREE.BufferGeometry, thickness: number): vo
   geometry.setAttribute('position', new THREE.BufferAttribute(new Float32Array(positions), 3))
   geometry.setAttribute('color', new THREE.BufferAttribute(new Float32Array(colors), 3))
   geometry.setIndex(null)
+  geometry.computeVertexNormals()
+  invalidateBounds(geometry)
+}
+
+/**
+ * Presses every part flat across its own width, so a creature built from solids
+ * becomes a set of cutouts standing in the same arrangement. The parts keep
+ * their silhouettes and lose a dimension.
+ */
+export function flatten(geometry: THREE.BufferGeometry, keep: number): void {
+  const position = geometry.getAttribute('position') as THREE.BufferAttribute
+  const points = position.array as Float32Array
+
+  for (let i = 0; i < points.length; i += 3) points[i] = points[i]! * keep
+
+  position.needsUpdate = true
   geometry.computeVertexNormals()
   invalidateBounds(geometry)
 }

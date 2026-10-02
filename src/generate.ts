@@ -69,9 +69,13 @@ export function generate(input: CreatureSpec): Creature {
   const res = resolutionFor(spec.detail.level, spec.shape.edge)
   const radial = spec.body.mutation === 'radial'
   const segmented = spec.body.mutation === 'segmented'
+  const coiled = spec.body.mutation === 'coiled'
+  // A coiled body is the same chain as a segmented one, bent at every joint and
+  // long enough to come round on itself — the curvature is the whole mutation.
+  const chained = segmented || coiled
   const branching = spec.body.mutation === 'recursive' ? 1 : 0
   // A ring of limbs has no front to lean into; a chain of them only works flat.
-  const pitch = radial ? 0 : segmented ? 1.36 : PITCH[spec.body.build]
+  const pitch = radial ? 0 : segmented ? 1.36 : coiled ? 0.3 : PITCH[spec.body.build]
   const planted = spec.body.frontLimb === 'forelegs'
 
   const palette: parts.Palette = {
@@ -211,11 +215,11 @@ export function generate(input: CreatureSpec): Creature {
   const hip = joint('hip', root, { x: 0, y: legLen, z: 0 }, rest())
   const spine = joint('spine', hip, { x: 0, y: 0, z: 0 }, rest(pitch))
 
-  const beadCount = spec.torso.segments + 2
-  const beadLength = dims.spineLength / beadCount
+  const beadCount = coiled ? (spec.torso.segments + 2) * 2 : spec.torso.segments + 2
+  const beadLength = (dims.spineLength * (coiled ? 1.9 : 1)) / beadCount
   const chain: THREE.Object3D[] = []
 
-  if (segmented) {
+  if (chained) {
     // One torso gives way to a chain of body units, each a joint of its own and
     // each carrying its own pair of limbs. The topology is different, not the
     // part list: nothing has been added, the body has been cut up.
@@ -225,7 +229,7 @@ export function generate(input: CreatureSpec): Creature {
         `body${index}`,
         previous,
         { x: 0, y: index === 0 ? 0 : beadLength, z: 0 },
-        rest(0, (index % 2 === 0 ? 1 : -1) * 0.1),
+        coiled ? rest(-TAU / beadCount) : rest(0, (index % 2 === 0 ? 1 : -1) * 0.1),
       )
       attach(node, parts.segment(forge, spec.torso.segments, index, beadCount, beadLength))
       chain.push(node)
@@ -451,8 +455,8 @@ export function generate(input: CreatureSpec): Creature {
   }
 
   // ─── neck and head, counter-rotated against the pitch ─────────────────────
-  const neckParent = segmented ? chain[chain.length - 1]! : spine
-  const neckAt = { x: 0, y: segmented ? beadLength : dims.spineLength, z: 0 }
+  const neckParent = chained ? chain[chain.length - 1]! : spine
+  const neckAt = { x: 0, y: chained ? beadLength : dims.spineLength, z: 0 }
   const neck = joint('neck', neckParent, neckAt, rest(-pitch * 0.5))
   attach(neck, parts.neck(forge))
 
