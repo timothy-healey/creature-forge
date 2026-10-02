@@ -11,6 +11,7 @@ import {
   HORN_COUNTS,
   LEG_TYPES,
   MESH_MODES,
+  PATTERNS,
   LIMB_SEGMENTS,
   PAIR_COUNTS,
   MUTATION_GROUPS,
@@ -144,6 +145,13 @@ function mountMutations(panel: HTMLElement, spec: CreatureSpec, changed: () => v
 function mountBody(panel: HTMLElement, spec: CreatureSpec, changed: () => void): void {
   panel.replaceChildren(
     section('Shape', slidersFor('Shape', spec, changed)),
+    section('Markings', [
+      choice('Pattern', PATTERNS, spec.skin.pattern, (pattern) => {
+        spec.skin.pattern = pattern
+        changed()
+      }),
+      ...slidersFor('Markings', spec, changed),
+    ]),
     section('Frame', [
       choice('Build', BUILDS, spec.body.build, (build) => {
         spec.body.build = build

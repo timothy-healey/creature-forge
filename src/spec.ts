@@ -1,3 +1,5 @@
+import { PATTERNS, type Pattern } from './pattern'
+
 /**
  * The creature as plain data. Single source of truth for everything downstream:
  * `generate` reads it to build geometry, `ui` writes to it, and because it is
@@ -107,6 +109,8 @@ export const LIMB_SEGMENTS: readonly SegmentsPerLimb[] = [2, 3, 4, 5]
 
 export interface CreatureSpec {
   body: { build: Build; frontLimb: FrontLimb; mesh: MeshMode; mutation: Mutation }
+  /** Markings, painted from the creature's own geometry rather than a texture. */
+  skin: { pattern: Pattern; scale: number; strength: number }
   /** How finely the same shape is described. Slides a creature between eras. */
   detail: { level: number }
   /**
@@ -134,7 +138,7 @@ export interface CreatureSpec {
   tail: { type: TailType }
   back: { ridge: RidgeType }
   wings: { type: WingType }
-  colors: { body: string; belly: string; accent: string; eye: string }
+  colors: { body: string; belly: string; accent: string; pattern: string; eye: string }
 }
 
 export type SliderPath =
@@ -142,6 +146,8 @@ export type SliderPath =
   | 'shape.edge'
   | 'shape.section'
   | 'shape.bulk'
+  | 'skin.scale'
+  | 'skin.strength'
   | 'head.length'
   | 'head.width'
   | 'neck.length'
@@ -169,6 +175,8 @@ export const SLIDERS: readonly SliderDef[] = [
   { path: 'shape.edge', label: 'Soft → sharp', group: 'Shape' },
   { path: 'shape.section', label: 'Deep → wide', group: 'Shape' },
   { path: 'shape.bulk', label: 'Mass fore/aft', group: 'Shape' },
+  { path: 'skin.scale', label: 'Size', group: 'Markings' },
+  { path: 'skin.strength', label: 'Strength', group: 'Markings' },
   { path: 'head.length', label: 'Length', group: 'Head' },
   { path: 'head.width', label: 'Width', group: 'Head' },
   { path: 'neck.length', label: 'Length', group: 'Neck' },
@@ -185,13 +193,14 @@ export const SLIDERS: readonly SliderDef[] = [
   { path: 'legs.thickness', label: 'Thickness', group: 'Legs' },
 ]
 
-export const COLOR_KEYS = ['body', 'belly', 'accent', 'eye'] as const
+export const COLOR_KEYS = ['body', 'belly', 'accent', 'pattern', 'eye'] as const
 export type ColorKey = (typeof COLOR_KEYS)[number]
 
 export const COLOR_LABELS: Record<ColorKey, string> = {
   body: 'Body',
   belly: 'Belly',
   accent: 'Horns & claws',
+  pattern: 'Markings',
   eye: 'Eyes',
 }
 
@@ -200,6 +209,7 @@ export function defaultSpec(): CreatureSpec {
     body: { build: 'upright', frontLimb: 'arms', mesh: 'jointed', mutation: 'none' },
     detail: { level: 0.3 },
     shape: { edge: 0.55, section: 0.45, bulk: 0.5 },
+    skin: { pattern: 'none', scale: 0.4, strength: 0.85 },
     head: { type: 'snout', length: 0.5, width: 0.5, horns: 1, eyes: 2, ears: 'none' },
     neck: { length: 0.3 },
     spine: { arch: 0.5, sway: 0.5 },
@@ -210,7 +220,7 @@ export function defaultSpec(): CreatureSpec {
     tail: { type: 'long' },
     back: { ridge: 'none' },
     wings: { type: 'none' },
-    colors: { body: '#7b4fbf', belly: '#e8c45a', accent: '#e07a2f', eye: '#1a1420' },
+    colors: { body: '#7b4fbf', belly: '#e8c45a', accent: '#e07a2f', pattern: '#2e1a4a', eye: '#1a1420' },
   }
 }
 
@@ -261,6 +271,7 @@ export function clampSpec(spec: CreatureSpec): CreatureSpec {
   out.legs.type = oneOf(LEG_TYPES, spec.legs?.type, fallback.legs.type)
   out.tail.type = oneOf(TAIL_TYPES, spec.tail?.type, fallback.tail.type)
   out.back.ridge = oneOf(RIDGE_TYPES, spec.back?.ridge, fallback.back.ridge)
+  out.skin.pattern = oneOf(PATTERNS, spec.skin?.pattern, fallback.skin.pattern)
   out.wings.type = oneOf(WING_TYPES, spec.wings?.type, fallback.wings.type)
 
   for (const slider of SLIDERS) {
@@ -302,6 +313,7 @@ export function randomSpec(
     // Rolled flat, not biased: the shape genes are the anti-sameness axis, and
     // their whole value is in the extremes a biased roll would never reach.
     shape: { edge: random(), section: random(), bulk: random() },
+    skin: { pattern: pick(PATTERNS), scale: 0.2 + random() * 0.6, strength: 0.6 + random() * 0.4 },
     head: {
       type: pick(HEAD_TYPES),
       length: biased(),
@@ -359,6 +371,13 @@ function rollPalette(random: () => number): CreatureSpec['colors'] {
       Math.min(0.9, lightness + 0.26 + random() * 0.1),
     ),
     accent: hslToHex(wrapHue(hue + 150 + random() * 60), 0.6 + random() * 0.3, 0.46 + random() * 0.16),
+    // Markings read as the same animal's, so they stay near the body's hue and
+    // step away in lightness rather than colour.
+    pattern: hslToHex(
+      wrapHue(hue + (random() * 40 - 20)),
+      saturation * (0.6 + random() * 0.5),
+      random() < 0.5 ? Math.max(0.08, lightness - 0.2) : Math.min(0.92, lightness + 0.3),
+    ),
     eye: hslToHex(wrapHue(hue + 180), 0.3 + random() * 0.3, lightness * 0.28),
   }
 }
@@ -376,3 +395,5 @@ function hslToHex(hue: number, saturation: number, lightness: number): string {
   }
   return `#${channel(0)}${channel(8)}${channel(4)}`
 }
+
+export { PATTERNS, type Pattern }

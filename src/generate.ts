@@ -3,6 +3,7 @@ import { mirrorX, resolutionFor } from './geometry'
 import { type RestMap, type RestPose, rest } from './joints'
 import * as parts from './parts'
 import type { Limb } from './animate'
+import { paint } from './pattern'
 import { DEFORMATIONS, deform, explode, skew, type DeformPart, type Deformation } from './mutate'
 import { buildSkin, type SkinPiece } from './skin'
 import { type CreatureSpec, clampSpec } from './spec'
@@ -677,6 +678,19 @@ export function generate(input: CreatureSpec): Creature {
         geometry: parts.knuckle(forge, radius, name.includes('Foot')),
       })
     }
+  }
+
+  // ─── markings, before anything is welded, so the colours survive it ──────
+  if (spec.skin.pattern !== 'none') {
+    root.updateMatrixWorld(true)
+    const standing = new THREE.Box3().setFromObject(root)
+    paint(deformable, spec.skin.pattern, {
+      colour: new THREE.Color(spec.colors.pattern),
+      scale: spec.skin.scale,
+      strength: spec.skin.strength,
+      size: Number.isFinite(standing.max.y) ? standing.getSize(new THREE.Vector3()).length() : 1,
+      ground: Number.isFinite(standing.min.y) ? standing.min.y : 0,
+    })
   }
 
   // ─── deform, before anything is welded, so it composes with both modes ───
