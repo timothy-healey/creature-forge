@@ -110,7 +110,7 @@ describe('body plans', () => {
     upright.neck.length = 0.7
     const onAllFours = {
       ...upright,
-      body: { build: 'quadruped' as const, frontLimb: 'forelegs' as const, mesh: 'jointed' as const },
+      body: { ...upright.body, build: 'quadruped' as const, frontLimb: 'forelegs' as const },
     }
 
     const a = generate(upright)

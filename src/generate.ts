@@ -46,13 +46,29 @@ const TAIL_SEGMENTS: Record<CreatureSpec['tail']['type'], number> = {
 }
 
 const SHOULDER_ALONG = 0.82
+const TAU = Math.PI * 2
+
+/**
+ * The first four limbs of a ring borrow the canonical joint names, so a gait
+ * drives them without knowing it is looking at a radial creature. Opposite
+ * names land opposite each other in the ring, which is what makes the walk read
+ * as a wave rather than a twitch.
+ */
+const RADIAL_NAMES: readonly (readonly [string, string, string])[] = [
+  ['backUpperL', 'backLowerL', 'backFootL'],
+  ['frontUpperL', 'frontLowerL', 'frontFootL'],
+  ['backUpperR', 'backLowerR', 'backFootR'],
+  ['frontUpperR', 'frontLowerR', 'frontFootR'],
+]
 
 const lerp = (a: number, b: number, t: number) => a + (b - a) * t
 
 export function generate(input: CreatureSpec): Creature {
   const spec = clampSpec(input)
   const res = resolutionFor(spec.detail.level, spec.shape.edge)
-  const pitch = PITCH[spec.body.build]
+  const radial = spec.body.mutation === 'radial'
+  // A ring of limbs has no front, so there is nothing for a pitch to lean into.
+  const pitch = radial ? 0 : PITCH[spec.body.build]
   const planted = spec.body.frontLimb === 'forelegs'
 
   const palette: parts.Palette = {
@@ -174,87 +190,158 @@ export function generate(input: CreatureSpec): Creature {
 
   attach(spine, parts.torso(forge, spec.torso.segments))
 
-  // ─── back legs ────────────────────────────────────────────────────────────
+  // ─── limbs ────────────────────────────────────────────────────────────────
   const thighLen = legLen * 0.52
   const shinLen = legLen * 0.4
 
-  for (const side of [-1, 1]) {
-    const suffix = side < 0 ? 'L' : 'R'
-    const upper = joint(
-      `backUpper${suffix}`,
-      hip,
-      { x: side * dims.legThick * 1.05, y: 0, z: 0 },
-      rest(digitigrade ? 0.52 : 0.04),
-    )
+  /** One upper → lower → foot chain. Bilateral pairs and radial rings share it. */
+  function limbChain(options: {
+    names: readonly [string, string, string]
+    parent: THREE.Object3D
+    at: THREE.Vector3Like
+    pose: RestPose
+    upperLen: number
+    lowerLen: number
+    thickness: number
+    bend: readonly [number, number]
+    ending: 'foot' | 'hand'
+    footScale?: number
+  }): THREE.Object3D {
+    const [upperName, lowerName, footName] = options.names
+    const upper = joint(upperName, options.parent, options.at, options.pose)
     mesh(
-      `backThigh${suffix}`,
+      `${upperName}Mesh`,
       upper,
-      parts.limb(forge, thighLen, dims.legThick * 0.58, dims.legThick * 0.64, dims.legThick * 0.44),
+      parts.limb(
+        forge,
+        options.upperLen,
+        options.thickness * 0.58,
+        options.thickness * 0.64,
+        options.thickness * 0.44,
+      ),
     )
 
-    const lower = joint(`backLower${suffix}`, upper, { x: 0, y: -thighLen, z: 0 }, rest(digitigrade ? -1.0 : -0.08))
+    const lower = joint(lowerName, upper, { x: 0, y: -options.upperLen, z: 0 }, rest(options.bend[0]))
     mesh(
-      `backShin${suffix}`,
+      `${lowerName}Mesh`,
       lower,
-      parts.limb(forge, shinLen, dims.legThick * 0.46, dims.legThick * 0.5, dims.legThick * 0.34),
+      parts.limb(
+        forge,
+        options.lowerLen,
+        options.thickness * 0.46,
+        options.thickness * 0.5,
+        options.thickness * 0.34,
+      ),
     )
 
-    const ankle = joint(`backFoot${suffix}`, lower, { x: 0, y: -shinLen, z: 0 }, rest(digitigrade ? 0.48 : 0.04))
-    mesh(`backFoot${suffix}Mesh`, ankle, parts.foot(forge, footHeight), {
-      x: 0,
-      y: -footHeight * 0.5,
-      z: -dims.legThick * 0.45,
-    })
-  }
-
-  // ─── shoulders, placed before their limbs are sized ───────────────────────
-  const shoulders = [-1, 1].map((side) =>
-    joint(
-      `frontUpper${side < 0 ? 'L' : 'R'}`,
-      spine,
-      { x: side * torsoW * 0.46, y: dims.spineLength * SHOULDER_ALONG, z: 0 },
-      planted ? rest(-pitch, 0, side * 0.06) : rest(-0.08 - pitch * 0.3, 0, side * 0.16),
-    ),
-  )
-
-  root.updateMatrixWorld(true)
-  const standing = new THREE.Box3()
-  for (const suffix of ['L', 'R']) standing.expandByObject(joints[`backFoot${suffix}`]!)
-  const ground = Number.isFinite(standing.min.y) ? standing.min.y : 0
-  const shoulderHeight = shoulders[0]!.getWorldPosition(new THREE.Vector3()).y
-
-  // A foreleg is as long as the gap between its shoulder and the floor.
-  const frontLen = planted ? Math.max(0.08, shoulderHeight - ground - footHeight) : armLen
-  const frontUpperLen = frontLen * 0.52
-  const frontLowerLen = frontLen * 0.48
-  const frontThick = planted ? dims.legThick * 0.92 : dims.armThick
-
-  shoulders.forEach((shoulder, index) => {
-    const suffix = index === 0 ? 'L' : 'R'
-    mesh(
-      `frontUpper${suffix}Mesh`,
-      shoulder,
-      parts.limb(forge, frontUpperLen, frontThick * 0.56, frontThick * 0.6, frontThick * 0.44),
-    )
-
-    const lower = joint(`frontLower${suffix}`, shoulder, { x: 0, y: -frontUpperLen, z: 0 }, rest(planted ? 0.12 : 0.2))
-    mesh(
-      `frontLower${suffix}Mesh`,
-      lower,
-      parts.limb(forge, frontLowerLen, frontThick * 0.46, frontThick * 0.48, frontThick * 0.34),
-    )
-
-    const end = joint(`frontFoot${suffix}`, lower, { x: 0, y: -frontLowerLen, z: 0 }, rest(planted ? 0.04 : 0))
-    if (planted) {
-      mesh(`frontFoot${suffix}Mesh`, end, parts.foot(forge, footHeight * 0.85), {
+    const end = joint(footName, lower, { x: 0, y: -options.lowerLen, z: 0 }, rest(options.bend[1]))
+    if (options.ending === 'foot') {
+      const height = footHeight * (options.footScale ?? 1)
+      mesh(`${footName}Mesh`, end, parts.foot(forge, height), {
         x: 0,
-        y: -footHeight * 0.42,
-        z: -dims.legThick * 0.4,
+        y: -height * 0.5,
+        z: -dims.legThick * 0.45,
       })
     } else {
-      mesh(`hand${suffix}`, end, parts.hand(forge, frontThick))
+      mesh(`${footName}Mesh`, end, parts.hand(forge, options.thickness))
     }
-  })
+
+    return upper
+  }
+
+  if (radial) {
+    // Bilateral pairs give way to one ring of identical limbs around the spine.
+    // Nothing is added or removed — the symmetry group itself is different.
+    const count = 4 + (spec.torso.segments - 2)
+    const ring = dims.torsoW * 0.52 * shape.wide
+
+    for (let index = 0; index < count; index++) {
+      const angle = (TAU * index) / count
+      const names = RADIAL_NAMES[index] ?? ([
+        `radialUpper${index}`,
+        `radialLower${index}`,
+        `radialFoot${index}`,
+      ] as const)
+
+      // A limb points straight down the Y axis, so turning it about Y does
+      // nothing. The socket does the turning, and the limb then splays and
+      // bends in its own frame — outward from the axis rather than forward.
+      const socket = new THREE.Object3D()
+      socket.position.set(Math.cos(angle) * ring, 0, Math.sin(angle) * ring)
+      socket.rotation.y = Math.PI / 2 - angle
+      hip.add(socket)
+
+      limbChain({
+        names,
+        parent: socket,
+        at: { x: 0, y: 0, z: 0 },
+        pose: rest(-0.34),
+        upperLen: thighLen,
+        lowerLen: shinLen,
+        thickness: dims.legThick,
+        bend: [0.62, -0.26],
+        ending: 'foot',
+      })
+    }
+  } else {
+    for (const side of [-1, 1]) {
+      const suffix = side < 0 ? 'L' : 'R'
+      limbChain({
+        names: [`backUpper${suffix}`, `backLower${suffix}`, `backFoot${suffix}`],
+        parent: hip,
+        at: { x: side * dims.legThick * 1.05, y: 0, z: 0 },
+        pose: rest(digitigrade ? 0.52 : 0.04),
+        upperLen: thighLen,
+        lowerLen: shinLen,
+        thickness: dims.legThick,
+        bend: [digitigrade ? -1.0 : -0.08, digitigrade ? 0.48 : 0.04],
+        ending: 'foot',
+      })
+    }
+  }
+
+  // ─── front limbs, sized against the floor the hind feet stand on ──────────
+  if (!radial) {
+    const shoulderPoses = [-1, 1].map((side) =>
+      planted ? rest(-pitch, 0, side * 0.06) : rest(-0.08 - pitch * 0.3, 0, side * 0.16),
+    )
+    const probes = [-1, 1].map((side, index) =>
+      joint(
+        `frontUpper${side < 0 ? 'L' : 'R'}`,
+        spine,
+        { x: side * torsoW * 0.46, y: dims.spineLength * SHOULDER_ALONG, z: 0 },
+        shoulderPoses[index]!,
+      ),
+    )
+
+    root.updateMatrixWorld(true)
+    const standing = new THREE.Box3()
+    for (const suffix of ['L', 'R']) standing.expandByObject(joints[`backFoot${suffix}`]!)
+    const ground = Number.isFinite(standing.min.y) ? standing.min.y : 0
+    const shoulderHeight = probes[0]!.getWorldPosition(new THREE.Vector3()).y
+
+    // A foreleg is as long as the gap between its shoulder and the floor.
+    const frontLen = planted ? Math.max(0.08, shoulderHeight - ground - footHeight) : armLen
+    const frontThick = planted ? dims.legThick * 0.92 : dims.armThick
+
+    for (const probe of probes) spine.remove(probe)
+
+    ;[-1, 1].forEach((side, index) => {
+      const suffix = side < 0 ? 'L' : 'R'
+      limbChain({
+        names: [`frontUpper${suffix}`, `frontLower${suffix}`, `frontFoot${suffix}`],
+        parent: spine,
+        at: { x: side * torsoW * 0.46, y: dims.spineLength * SHOULDER_ALONG, z: 0 },
+        pose: shoulderPoses[index]!,
+        upperLen: frontLen * 0.52,
+        lowerLen: frontLen * 0.48,
+        thickness: frontThick,
+        bend: [planted ? 0.12 : 0.2, planted ? 0.04 : 0],
+        ending: planted ? 'foot' : 'hand',
+        footScale: 0.85,
+      })
+    })
+  }
 
   // ─── neck and head, counter-rotated against the pitch ─────────────────────
   const neck = joint('neck', spine, { x: 0, y: dims.spineLength, z: 0 }, rest(-pitch * 0.5))
@@ -316,7 +403,7 @@ export function generate(input: CreatureSpec): Creature {
   }
 
   // ─── tail, hung off the pelvis so the spine's pitch never swings it ───────
-  const segments = TAIL_SEGMENTS[spec.tail.type]
+  const segments = radial ? 0 : TAIL_SEGMENTS[spec.tail.type]
   const segmentLength = (0.1 + torsoD * 0.42) * (segments > 1 ? 1 : 0.8)
   const tailLift = { upright: -0.12, hunched: 0.3, quadruped: 0.16 }[spec.body.build]
   let tailParent: THREE.Object3D = hip

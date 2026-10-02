@@ -127,7 +127,7 @@ describe('the two mesh modes', () => {
       for (const build of BUILDS) {
         for (const frontLimb of FRONT_LIMBS) {
           const spec = defaultSpec()
-          spec.body = { build, frontLimb, mesh }
+          spec.body = { ...spec.body, build, frontLimb, mesh }
           const creature = generate(spec)
           creature.root.updateMatrixWorld(true)
 

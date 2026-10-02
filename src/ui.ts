@@ -9,6 +9,7 @@ import {
   HORN_COUNTS,
   LEG_TYPES,
   MESH_MODES,
+  MUTATIONS,
   RIDGE_TYPES,
   SEGMENT_COUNTS,
   SLIDERS,
@@ -43,7 +44,7 @@ export function mountControls(panel: HTMLElement, spec: CreatureSpec, handlers: 
   panel.append(
     rollButton(() => {
       // Detail is a viewing choice, not part of the creature — a roll keeps it.
-      const rolled = randomSpec(Math.random, spec.detail.level, spec.body.mesh)
+      const rolled = randomSpec(Math.random, spec.detail.level, spec.body.mesh, spec.body.mutation)
       mountControls(panel, rolled, handlers)
       handlers.onSpecChange(rolled)
     }),
@@ -53,6 +54,10 @@ export function mountControls(panel: HTMLElement, spec: CreatureSpec, handlers: 
     section('Body', [
       choiceGroup('Build', BUILDS, spec.body.build, (build) => {
         spec.body.build = build
+        changed()
+      }),
+      choiceGroup('Mutation', MUTATIONS, spec.body.mutation, (mutation) => {
+        spec.body.mutation = mutation
         changed()
       }),
       choiceGroup('Mesh', MESH_MODES, spec.body.mesh, (mesh) => {
