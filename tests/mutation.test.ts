@@ -2,7 +2,15 @@ import { describe, expect, test } from 'vitest'
 import * as THREE from 'three'
 import { CORE_JOINTS } from '../src/joints'
 import { generate } from '../src/generate'
-import { BUILDS, MESH_MODES, MUTATIONS, SEGMENT_COUNTS, defaultSpec, type CreatureSpec } from '../src/spec'
+import {
+  BUILDS,
+  MESH_MODES,
+  MUTATIONS,
+  SEGMENT_COUNTS,
+  defaultSpec,
+  randomSpec,
+  type CreatureSpec,
+} from '../src/spec'
 
 const mutated = (edit: (spec: CreatureSpec) => void = () => {}): CreatureSpec => {
   const spec = defaultSpec()
@@ -637,6 +645,148 @@ describe('the recursive mutation', () => {
 
       expect(new THREE.Box3().setFromObject(creature.root).min.y, mesh).toBeCloseTo(0, 1)
       expect(creature.triangleCount, mesh).toBeGreaterThan(0)
+    }
+  })
+})
+
+describe('the asymmetric mutation', () => {
+  const lopsided = (edit: (spec: CreatureSpec) => void = () => {}): CreatureSpec => {
+    const spec = defaultSpec()
+    spec.body.mutation = 'asymmetric'
+    edit(spec)
+    return spec
+  }
+
+  const limbBox = (creature: ReturnType<typeof generate>, joint: string) => {
+    creature.root.updateMatrixWorld(true)
+    return new THREE.Box3().expandByObject(creature.joints[joint]!).getSize(new THREE.Vector3())
+  }
+
+  test('a normal creature’s two sides match', () => {
+    const creature = generate(defaultSpec())
+
+    expect(limbBox(creature, 'backUpperL').length()).toBeCloseTo(limbBox(creature, 'backUpperR').length(), 5)
+  })
+
+  test('a skewed one’s do not', () => {
+    const creature = generate(lopsided())
+
+    expect(limbBox(creature, 'backUpperL').length()).not.toBeCloseTo(
+      limbBox(creature, 'backUpperR').length(),
+      2,
+    )
+  })
+
+  test('keeps every triangle — it rescales parts, it does not rebuild them', () => {
+    expect(generate(lopsided()).triangleCount).toBe(generate(defaultSpec()).triangleCount)
+  })
+
+  test('skews the same way every time', () => {
+    expect(limbBox(generate(lopsided()), 'frontUpperL').length()).toBeCloseTo(
+      limbBox(generate(lopsided()), 'frontUpperL').length(),
+      9,
+    )
+  })
+
+  test('still stands on the ground, lopsided as it is', () => {
+    const creature = generate(lopsided())
+    creature.root.updateMatrixWorld(true)
+
+    expect(new THREE.Box3().setFromObject(creature.root).min.y).toBeCloseTo(0, 1)
+  })
+})
+
+describe('the inverted mutation', () => {
+  const insideOut = (edit: (spec: CreatureSpec) => void = () => {}): CreatureSpec => {
+    const spec = defaultSpec()
+    spec.body.mutation = 'inverted'
+    edit(spec)
+    return spec
+  }
+
+  const normalsOf = (creature: ReturnType<typeof generate>) => {
+    const out: number[] = []
+    creature.root.updateMatrixWorld(true)
+    creature.root.traverse((node) => {
+      const mesh = node as THREE.Mesh
+      if (!mesh.isMesh || mesh.name !== 'torso') return
+      const position = mesh.geometry.getAttribute('position')
+      const centre = new THREE.Vector3()
+      mesh.geometry.computeBoundingBox()
+      mesh.geometry.boundingBox!.getCenter(centre)
+
+      for (let i = 0; i < position.count; i += 3) {
+        const a = new THREE.Vector3().fromBufferAttribute(position, i)
+        const b = new THREE.Vector3().fromBufferAttribute(position, i + 1)
+        const c = new THREE.Vector3().fromBufferAttribute(position, i + 2)
+        const normal = new THREE.Vector3().subVectors(b, a).cross(new THREE.Vector3().subVectors(c, a))
+        const outward = new THREE.Vector3().addVectors(a, b).add(c).divideScalar(3).sub(centre)
+        out.push(normal.dot(outward))
+      }
+    })
+    return out
+  }
+
+  test('a normal creature faces outward everywhere', () => {
+    const facings = normalsOf(generate(defaultSpec()))
+
+    expect(facings.length).toBeGreaterThan(0)
+    expect(facings.every((value) => value > 0)).toBe(true)
+  })
+
+  test('an inverted one faces inward everywhere', () => {
+    const facings = normalsOf(generate(insideOut()))
+
+    expect(facings.length).toBeGreaterThan(0)
+    expect(facings.every((value) => value < 0)).toBe(true)
+  })
+
+  test('keeps every triangle and the whole silhouette', () => {
+    const solid = generate(defaultSpec())
+    const hollow = generate(insideOut())
+    solid.root.updateMatrixWorld(true)
+    hollow.root.updateMatrixWorld(true)
+
+    expect(hollow.triangleCount).toBe(solid.triangleCount)
+
+    const a = new THREE.Box3().setFromObject(solid.root).getSize(new THREE.Vector3())
+    const b = new THREE.Box3().setFromObject(hollow.root).getSize(new THREE.Vector3())
+    expect(b.distanceTo(a)).toBeLessThan(1e-6)
+  })
+})
+
+describe('the whole mutation set', () => {
+  test('every one of them builds, stands, and keeps the gait’s joints, in both mesh modes', () => {
+    for (const mutation of MUTATIONS) {
+      for (const mesh of MESH_MODES) {
+        const spec = defaultSpec()
+        spec.body.mutation = mutation
+        spec.body.mesh = mesh
+        const creature = generate(spec)
+        creature.root.updateMatrixWorld(true)
+        const label = `${mutation}/${mesh}`
+
+        const bounds = new THREE.Box3().setFromObject(creature.root)
+        expect(bounds.isEmpty(), label).toBe(false)
+        expect(bounds.min.y, label).toBeCloseTo(0, 1)
+        expect(creature.triangleCount, label).toBeGreaterThan(0)
+        for (const name of CORE_JOINTS) expect(creature.joints[name], `${label}/${name}`).toBeDefined()
+      }
+    }
+  })
+
+  test('every one of them survives a rolled creature, whatever it rolled', () => {
+    for (const mutation of MUTATIONS) {
+      for (let seed = 0; seed < 6; seed++) {
+        const spec = randomSpec()
+        spec.body.mutation = mutation
+        const creature = generate(spec)
+        creature.root.updateMatrixWorld(true)
+
+        const bounds = new THREE.Box3().setFromObject(creature.root)
+        expect(bounds.isEmpty(), mutation).toBe(false)
+        expect(Number.isFinite(bounds.max.y), mutation).toBe(true)
+      }
     }
   })
 })

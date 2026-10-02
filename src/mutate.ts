@@ -137,9 +137,15 @@ export interface DeformContext {
  * tree exists and its world matrices are current, so a deformation can reason
  * about where a vertex actually is rather than only where it is in its own part.
  */
-export type Deformation = 'shattered' | 'melted' | 'voxel' | 'twisted'
+export type Deformation = 'shattered' | 'melted' | 'voxel' | 'twisted' | 'inverted'
 
-export const DEFORMATIONS: readonly Deformation[] = ['shattered', 'melted', 'voxel', 'twisted']
+export const DEFORMATIONS: readonly Deformation[] = [
+  'shattered',
+  'melted',
+  'voxel',
+  'twisted',
+  'inverted',
+]
 
 export function deform(
   mutation: Deformation,
@@ -155,6 +161,10 @@ export function deform(
     }
     if (mutation === 'voxel') {
       voxelise(part.geometry, context.scale * 0.21)
+      continue
+    }
+    if (mutation === 'inverted') {
+      invert(part.geometry)
       continue
     }
 
@@ -299,4 +309,59 @@ export function explode(parts: readonly DeformPart[], centre: THREE.Vector3, amo
     parent.getWorldQuaternion(turn).invert()
     part.node.position.add(push.applyQuaternion(turn))
   }
+}
+
+/**
+ * Breaks the mirror. Every part is scaled and canted by a hash of where it sits,
+ * and because a part and its opposite number sit at opposite x, no two matching
+ * parts ever draw the same number. The creature stops having a left and a right
+ * that agree.
+ */
+export function skew(parts: readonly DeformPart[], strength: number): void {
+  const here = new THREE.Vector3()
+
+  for (const part of parts) {
+    part.node.getWorldPosition(here)
+    const a = noise(here.x, here.y, here.z)
+    const b = noise(here.z, here.x, here.y)
+    const c = noise(here.y, here.z, here.x)
+
+    part.node.scale.set(
+      1 + (a - 0.5) * strength * 1.6,
+      1 + (b - 0.5) * strength,
+      1 + (c - 0.5) * strength * 1.3,
+    )
+    part.node.rotation.x += (b - 0.5) * strength * 0.9
+    part.node.rotation.z += (c - 0.5) * strength * 0.9
+  }
+}
+
+/**
+ * Turns the surface inside out by reversing every triangle's winding. With
+ * back faces culled, the side facing you disappears and you see the far inside
+ * of the creature instead — the same shape, read from within.
+ */
+export function invert(geometry: THREE.BufferGeometry): void {
+  const position = geometry.getAttribute('position') as THREE.BufferAttribute
+  const color = geometry.getAttribute('color') as THREE.BufferAttribute
+  const points = position.array as Float32Array
+  const tints = color.array as Float32Array
+
+  for (let triangle = 0; triangle + 8 < points.length; triangle += 9) {
+    for (let axis = 0; axis < 3; axis++) {
+      const b = triangle + 3 + axis
+      const c = triangle + 6 + axis
+      const point = points[b]!
+      points[b] = points[c]!
+      points[c] = point
+      const tint = tints[b]!
+      tints[b] = tints[c]!
+      tints[c] = tint
+    }
+  }
+
+  position.needsUpdate = true
+  color.needsUpdate = true
+  geometry.computeVertexNormals()
+  invalidateBounds(geometry)
 }

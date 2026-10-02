@@ -2,7 +2,7 @@ import * as THREE from 'three'
 import { mirrorX, resolutionFor } from './geometry'
 import { type RestMap, type RestPose, rest } from './joints'
 import * as parts from './parts'
-import { DEFORMATIONS, deform, explode, type DeformPart, type Deformation } from './mutate'
+import { DEFORMATIONS, deform, explode, skew, type DeformPart, type Deformation } from './mutate'
 import { buildSkin, type SkinPiece } from './skin'
 import { type CreatureSpec, clampSpec } from './spec'
 
@@ -576,6 +576,11 @@ export function generate(input: CreatureSpec): Creature {
       scale: dims.torsoW,
       ground: Number.isFinite(standing.min.y) ? standing.min.y : 0,
     })
+  }
+
+  if (spec.body.mutation === 'asymmetric') {
+    root.updateMatrixWorld(true)
+    skew(deformable, 0.5)
   }
 
   if (spec.body.mutation === 'exploded') {
