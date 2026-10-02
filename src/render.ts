@@ -36,6 +36,30 @@ export function defaultView(): ViewSettings {
 const BACKGROUND = new THREE.Color('#1b1726')
 const snapGrid = new THREE.Vector2(160, 120)
 
+/**
+ * Remembers what the meshes are currently wearing.
+ *
+ * This exists because of a bug worth not repeating: the viewport used to decide
+ * whether to re-dress by comparing the incoming settings against its own, and
+ * callers pass the same object back after mutating it — so it was comparing a
+ * value to itself, always found no change, and the render modes did nothing
+ * until something else happened to rebuild the creature.
+ */
+export function createWardrobe() {
+  let mode: RenderMode | null = null
+  let flat: boolean | null = null
+
+  return {
+    needsChange(nextMode: RenderMode, nextFlat: boolean, force = false): boolean {
+      return force || nextMode !== mode || nextFlat !== flat
+    },
+    wore(nextMode: RenderMode, nextFlat: boolean): void {
+      mode = nextMode
+      flat = nextFlat
+    },
+  }
+}
+
 export interface Viewport {
   show(creature: Creature, stance: Stance): void
   setGait(gait: Gait): void
@@ -81,13 +105,20 @@ export function createViewport(canvas: HTMLCanvasElement): Viewport {
   let gait: Gait = 'idle'
   let view = defaultView()
   let skinMaterial: THREE.Material | null = null
+  const wardrobe = createWardrobe()
   let running = true
   const clock = new THREE.Clock()
 
-  /** Swaps every mesh over to the material the current render mode calls for. */
-  function dress(): void {
+  /**
+   * Swaps every mesh over to the material the current render mode calls for.
+   * Cheap to call from anywhere: it does nothing unless the mode, the shading
+   * or the creature itself has actually changed.
+   */
+  function dress(force = false): void {
     if (!creature) return
     const flat = stance.mesh !== 'skinned'
+    if (!wardrobe.needsChange(view.render, flat, force)) return
+
     const next = materialFor(view.render, flat)
     snapVertices(next)
 
@@ -98,6 +129,7 @@ export function createViewport(canvas: HTMLCanvasElement): Viewport {
 
     skinMaterial?.dispose()
     skinMaterial = next
+    wardrobe.wore(view.render, flat)
     ground.visible = view.render !== 'silhouette' && view.render !== 'xray'
   }
 
@@ -109,7 +141,7 @@ export function createViewport(canvas: HTMLCanvasElement): Viewport {
     }
     creature = next
     scene.add(next.root)
-    dress()
+    dress(true)
 
     const bounds = new THREE.Box3().setFromObject(next.root)
     controls.target.set(0, bounds.max.y * 0.5, 0)
@@ -150,13 +182,12 @@ export function createViewport(canvas: HTMLCanvasElement): Viewport {
       gait = next
     },
     setView(next) {
-      const changedMode = next.render !== view.render
       view = next
       // There is no "off" for the snap — a steady image is just a fine enough
       // grid that you stop noticing it, so the scale runs exponentially.
       const grid = 40 * 100 ** Math.min(1, Math.max(0, next.wobble))
       snapGrid.set(grid, grid * 0.75)
-      if (changedMode) dress()
+      dress()
     },
     dispose() {
       running = false
@@ -181,7 +212,7 @@ function toonSteps(): THREE.DataTexture {
   return texture
 }
 
-function materialFor(mode: RenderMode, flat: boolean): THREE.Material {
+export function materialFor(mode: RenderMode, flat: boolean): THREE.Material {
   switch (mode) {
     case 'unlit':
       // No lighting at all, just the vertex colours — what the hardware did.
