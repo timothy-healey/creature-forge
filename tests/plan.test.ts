@@ -108,7 +108,10 @@ describe('body plans', () => {
   test('carries a quadruped’s head lower and further forward than an upright’s', () => {
     const upright = defaultSpec()
     upright.neck.length = 0.7
-    const onAllFours = { ...upright, body: { build: 'quadruped' as const, frontLimb: 'forelegs' as const } }
+    const onAllFours = {
+      ...upright,
+      body: { build: 'quadruped' as const, frontLimb: 'forelegs' as const, mesh: 'jointed' as const },
+    }
 
     const a = generate(upright)
     const b = generate(onAllFours)
@@ -138,7 +141,7 @@ describe('body plans', () => {
         for (const ridge of RIDGE_TYPES) {
           for (const tail of TAIL_TYPES) {
             const spec = defaultSpec()
-            spec.body = { build, frontLimb }
+            spec.body = { ...spec.body, build, frontLimb }
             spec.back.ridge = ridge
             spec.tail.type = tail
             const label = `${build}/${frontLimb}/${ridge}/${tail}`

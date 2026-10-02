@@ -13,6 +13,12 @@
  */
 
 export type Build = 'upright' | 'hunched' | 'quadruped'
+/**
+ * How the creature is put together. `jointed` is a stack of rigid parts that
+ * pivot at visible seams; `skinned` is one continuous mesh bound to a skeleton,
+ * which is how Spyro was actually built and why it reads as a single creature.
+ */
+export type MeshMode = 'jointed' | 'skinned'
 export type FrontLimb = 'arms' | 'forelegs'
 export type HeadType = 'snout' | 'beak' | 'blunt' | 'crest'
 export type LegType = 'digitigrade' | 'plantigrade'
@@ -24,6 +30,7 @@ export type HornCount = 0 | 1 | 2
 export type SegmentCount = 2 | 3 | 4 | 5
 
 export const BUILDS: readonly Build[] = ['upright', 'hunched', 'quadruped']
+export const MESH_MODES: readonly MeshMode[] = ['jointed', 'skinned']
 export const FRONT_LIMBS: readonly FrontLimb[] = ['arms', 'forelegs']
 export const HEAD_TYPES: readonly HeadType[] = ['snout', 'beak', 'blunt', 'crest']
 export const LEG_TYPES: readonly LegType[] = ['digitigrade', 'plantigrade']
@@ -35,7 +42,7 @@ export const HORN_COUNTS: readonly HornCount[] = [0, 1, 2]
 export const SEGMENT_COUNTS: readonly SegmentCount[] = [2, 3, 4, 5]
 
 export interface CreatureSpec {
-  body: { build: Build; frontLimb: FrontLimb }
+  body: { build: Build; frontLimb: FrontLimb; mesh: MeshMode }
   /** How finely the same shape is described. Slides a creature between eras. */
   detail: { level: number }
   /**
@@ -106,7 +113,7 @@ export const COLOR_LABELS: Record<ColorKey, string> = {
 
 export function defaultSpec(): CreatureSpec {
   return {
-    body: { build: 'upright', frontLimb: 'arms' },
+    body: { build: 'upright', frontLimb: 'arms', mesh: 'jointed' },
     detail: { level: 0.3 },
     shape: { edge: 0.55, section: 0.45, bulk: 0.5 },
     head: { type: 'snout', length: 0.5, width: 0.5, horns: 1, ears: 'none' },
@@ -156,6 +163,7 @@ export function clampSpec(spec: CreatureSpec): CreatureSpec {
 
   out.body.build = oneOf(BUILDS, spec.body?.build, fallback.body.build)
   out.body.frontLimb = oneOf(FRONT_LIMBS, spec.body?.frontLimb, fallback.body.frontLimb)
+  out.body.mesh = oneOf(MESH_MODES, spec.body?.mesh, fallback.body.mesh)
   out.head.type = oneOf(HEAD_TYPES, spec.head?.type, fallback.head.type)
   out.head.horns = oneOf(HORN_COUNTS, spec.head?.horns, fallback.head.horns)
   out.head.ears = oneOf(EAR_TYPES, spec.head?.ears, fallback.head.ears)
@@ -186,13 +194,19 @@ export function clampSpec(spec: CreatureSpec): CreatureSpec {
  * pushed hard to an edge, because one exaggerated feature is what makes a roll
  * memorable while nine of them is noise.
  */
-export function randomSpec(random: () => number = Math.random, detail = defaultSpec().detail.level): CreatureSpec {
+export function randomSpec(
+  random: () => number = Math.random,
+  detail = defaultSpec().detail.level,
+  mesh: MeshMode = defaultSpec().body.mesh,
+): CreatureSpec {
   const pick = <T>(options: readonly T[]): T => options[Math.floor(random() * options.length)] ?? options[0]!
   const biased = () => (random() + random()) / 2
   const spec_detail = Math.min(1, Math.max(0, detail))
 
   const spec: CreatureSpec = {
-    body: { build: pick(BUILDS), frontLimb: pick(FRONT_LIMBS) },
+    // Mesh mode is a way of looking at a creature, not part of its identity,
+    // so a roll keeps whatever is selected — like detail.
+    body: { build: pick(BUILDS), frontLimb: pick(FRONT_LIMBS), mesh },
     detail: { level: spec_detail },
     // Rolled flat, not biased: the shape genes are the anti-sameness axis, and
     // their whole value is in the extremes a biased roll would never reach.

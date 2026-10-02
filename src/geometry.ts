@@ -251,10 +251,14 @@ export function pointBackward(geometry: THREE.BufferGeometry): THREE.BufferGeome
   return geometry
 }
 
-/** Hangs a part below its origin, so a limb swings from its top end. */
-export function hangDown(geometry: THREE.BufferGeometry): THREE.BufferGeometry {
+/**
+ * Hangs a part below its origin, so a limb swings from its top end. `rise`
+ * leaves the top poking up past the joint, so it overlaps whatever it hangs
+ * from rather than merely touching it.
+ */
+export function hangDown(geometry: THREE.BufferGeometry, rise = 0): THREE.BufferGeometry {
   geometry.computeBoundingBox()
-  geometry.translate(0, -geometry.boundingBox!.max.y, 0)
+  geometry.translate(0, -(geometry.boundingBox!.max.y - rise), 0)
   return geometry
 }
 

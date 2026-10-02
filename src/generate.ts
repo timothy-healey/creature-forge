@@ -2,6 +2,7 @@ import * as THREE from 'three'
 import { mirrorX, resolutionFor } from './geometry'
 import { type RestMap, type RestPose, rest } from './joints'
 import * as parts from './parts'
+import { buildSkin, type SkinPiece } from './skin'
 import { type CreatureSpec, clampSpec } from './spec'
 
 /**
@@ -93,33 +94,58 @@ export function generate(input: CreatureSpec): Creature {
   const footHeight = Math.max(0.05, dims.legThick * 0.42)
   const digitigrade = spec.legs.type === 'digitigrade'
 
+  const bound = spec.body.mesh === 'skinned'
+
   const root = new THREE.Group()
   root.name = 'creature'
   const joints: Record<string, THREE.Object3D> = {}
   const restMap: RestMap = {}
   const geometries: THREE.BufferGeometry[] = []
-  const material = new THREE.MeshLambertMaterial({ vertexColors: true, flatShading: true })
-  const forge: parts.Forge = { dims, palette, res, shape }
+  const bones: THREE.Bone[] = []
+  const pieces: SkinPiece[] = []
+  // A welded skin shades smoothly; a stack of rigid parts is faceted on purpose.
+  const material = new THREE.MeshLambertMaterial({ vertexColors: true, flatShading: !bound })
+  // Bound limbs push up into their parent so the two surfaces weld instead of abutting.
+  const forge: parts.Forge = { dims, palette, res, shape, embed: bound ? 0.55 : 0 }
 
-  function joint(name: string, parent: THREE.Object3D, at: THREE.Vector3Like, pose: RestPose): THREE.Group {
-    const group = new THREE.Group()
-    group.name = name
-    group.position.set(at.x, at.y, at.z)
-    group.rotation.set(pose.rx, pose.ry, pose.rz)
-    parent.add(group)
-    joints[name] = group
-    restMap[name] = { ...pose, y: group.position.y }
-    return group
+  function joint(name: string, parent: THREE.Object3D, at: THREE.Vector3Like, pose: RestPose): THREE.Object3D {
+    const node = bound ? new THREE.Bone() : new THREE.Group()
+    node.name = name
+    node.position.set(at.x, at.y, at.z)
+    node.rotation.set(pose.rx, pose.ry, pose.rz)
+    parent.add(node)
+    joints[name] = node
+    restMap[name] = { ...pose, y: node.position.y }
+    if (bound) bones.push(node as THREE.Bone)
+    return node
   }
 
-  function attach(parent: THREE.Object3D, placed: parts.Placed): THREE.Mesh {
+  /** The bone a part belongs to: the nearest one at or above where it hangs. */
+  function ownerOf(node: THREE.Object3D): THREE.Bone {
+    let current: THREE.Object3D | null = node
+    while (current) {
+      if ((current as THREE.Bone).isBone) return current as THREE.Bone
+      current = current.parent
+    }
+    return bones[0]!
+  }
+
+  function attach(parent: THREE.Object3D, placed: parts.Placed): THREE.Object3D {
+    const holder = new THREE.Object3D()
+    if (placed.position) holder.position.set(placed.position.x, placed.position.y, placed.position.z)
+    if (placed.rotation) holder.rotation.set(placed.rotation.x, placed.rotation.y, placed.rotation.z)
+    parent.add(holder)
+    geometries.push(placed.geometry)
+
+    if (bound) {
+      pieces.push({ geometry: placed.geometry, node: holder, bone: ownerOf(parent) })
+      return holder
+    }
+
     const mesh = new THREE.Mesh(placed.geometry, material)
     mesh.name = placed.name
-    if (placed.position) mesh.position.set(placed.position.x, placed.position.y, placed.position.z)
-    if (placed.rotation) mesh.rotation.set(placed.rotation.x, placed.rotation.y, placed.rotation.z)
-    parent.add(mesh)
-    geometries.push(placed.geometry)
-    return mesh
+    holder.add(mesh)
+    return holder
   }
 
   const mesh = (name: string, parent: THREE.Object3D, geometry: THREE.BufferGeometry, at?: THREE.Vector3Like) =>
@@ -317,6 +343,12 @@ export function generate(input: CreatureSpec): Creature {
     tailAt = { x: 0, y: 0, z: -segmentLength }
   }
 
+  // ─── weld into one skin, if that is the mode ──────────────────────────────
+  if (bound) {
+    const skin = buildSkin({ root, bones, pieces, material })
+    geometries.push(skin.geometry)
+  }
+
   // ─── settle on the ground ─────────────────────────────────────────────────
   root.updateMatrixWorld(true)
   const bounds = new THREE.Box3().setFromObject(root)
@@ -327,7 +359,8 @@ export function generate(input: CreatureSpec): Creature {
   root.traverse((node) => {
     const candidate = node as THREE.Mesh
     if (!candidate.isMesh) return
-    triangleCount += candidate.geometry.getAttribute('position').count / 3
+    const index = candidate.geometry.getIndex()
+    triangleCount += (index ? index.count : candidate.geometry.getAttribute('position').count) / 3
   })
 
   return {

@@ -62,6 +62,12 @@ export interface Forge {
   palette: Palette
   res: Resolution
   shape: Shape
+  /**
+   * How far a limb pushes up past its joint, as a fraction of its own width.
+   * Zero leaves parts abutting, which is right when they stay rigid; a bound
+   * skin wants them overlapping so the two surfaces weld into one.
+   */
+  embed: number
 }
 
 /** A geometry with somewhere to sit. The generator parents these to joints. */
@@ -376,7 +382,7 @@ export function ear({ dims, palette, res, shape }: Forge, type: CreatureSpec['he
 
 /** A limb segment: thin at the far end, bulging where `bulk` puts the muscle. */
 export function limb(
-  { palette, res, shape }: Forge,
+  { palette, res, shape, embed }: Forge,
   length: number,
   near: number,
   bulge: number,
@@ -397,6 +403,7 @@ export function limb(
       shape: section(shape, 1.12),
       colors: { side: palette.body },
     }),
+    near * embed,
   )
 }
 
