@@ -28,10 +28,16 @@ export interface SkinOptions {
   bones: THREE.Bone[]
   pieces: readonly SkinPiece[]
   material: THREE.Material
+  /**
+   * How close two vertices must be to share a normal and a set of weights.
+   * Parts interpenetrate rather than meeting exactly, so an exact weld never
+   * joins one to another; this is what carries shading across a joint.
+   */
+  fuse: number
 }
 
 /** How much of a vertex's influence the parent bone can take, at the joint itself. */
-const MAX_BLEND = 0.5
+const MAX_BLEND = 0.72
 /** Positions are welded at this resolution — fine enough to never merge real detail. */
 const WELD = 1e4
 const MAX_INFLUENCES = 4
@@ -55,7 +61,10 @@ export function buildSkin(options: SkinOptions): THREE.SkinnedMesh {
     origin.set(bone, bone.getWorldPosition(new THREE.Vector3()))
     // A bone's blend reaches part of the way to the next joint down the chain.
     const child = bone.children.find((node) => (node as THREE.Bone).isBone) as THREE.Bone | undefined
-    reach.set(bone, Math.max(0.02, (child ? child.position.length() : 0.12) * 0.7))
+    // The blend reaches most of the way to the next joint. Short of that, only
+    // the single ring sitting on the joint ever bends, and a surface that bends
+    // in one ring is indistinguishable from a hinge.
+    reach.set(bone, Math.max(0.03, (child ? child.position.length() : 0.16) * 1.15))
   }
 
   const welded = new Map<string, number>()
@@ -77,8 +86,11 @@ export function buildSkin(options: SkinOptions): THREE.SkinnedMesh {
       point.fromBufferAttribute(position, i).applyMatrix4(piece.node.matrixWorld)
 
       // Near the joint, hand some of this vertex over to the bone above it.
+      // Smoothstep rather than a square: a square collapses to nothing a third
+      // of the way along and leaves the bend looking like a crease.
       const closeness = Math.max(0, 1 - point.distanceTo(jointAt) / span)
-      const shared = parent ? MAX_BLEND * closeness * closeness : 0
+      const eased = closeness * closeness * (3 - 2 * closeness)
+      const shared = parent ? MAX_BLEND * eased : 0
 
       const tint = new THREE.Color(color.getX(i), color.getY(i), color.getZ(i))
       const key = [
@@ -136,6 +148,7 @@ export function buildSkin(options: SkinOptions): THREE.SkinnedMesh {
   geometry.setAttribute('skinWeight', new THREE.BufferAttribute(skinWeights, 4))
   geometry.setIndex(indices)
   geometry.computeVertexNormals()
+  fuseNeighbours(geometry, vertices, options.fuse)
 
   const mesh = new THREE.SkinnedMesh(geometry, options.material)
   mesh.name = 'skin'
@@ -146,6 +159,69 @@ export function buildSkin(options: SkinOptions): THREE.SkinnedMesh {
   mesh.bind(new THREE.Skeleton(options.bones))
 
   return mesh
+}
+
+/**
+ * Averages normals and weights between vertices that are merely near each other
+ * rather than identical.
+ *
+ * An exact weld only ever joins a part to itself, because parts overlap instead
+ * of meeting vertex to vertex. Positions and colours stay exact — so the palette
+ * keeps its hard edges — while shading and skinning flow across the junction,
+ * which is what stops an elbow looking like two pipes that happen to touch.
+ */
+function fuseNeighbours(geometry: THREE.BufferGeometry, vertices: readonly Welded[], cell: number): void {
+  if (cell <= 0) return
+
+  const position = geometry.getAttribute('position')
+  const normal = geometry.getAttribute('normal')
+  const weights = geometry.getAttribute('skinWeight') as THREE.BufferAttribute
+  const indices = geometry.getAttribute('skinIndex') as THREE.BufferAttribute
+
+  const groups = new Map<string, number[]>()
+  for (let i = 0; i < position.count; i++) {
+    const key = [
+      Math.round(position.getX(i) / cell),
+      Math.round(position.getY(i) / cell),
+      Math.round(position.getZ(i) / cell),
+    ].join(',')
+    const group = groups.get(key)
+    if (group) group.push(i)
+    else groups.set(key, [i])
+  }
+
+  const averaged = new THREE.Vector3()
+  for (const group of groups.values()) {
+    if (group.length < 2) continue
+
+    averaged.set(0, 0, 0)
+    const shared = new Map<number, number>()
+    for (const i of group) {
+      averaged.x += normal.getX(i)
+      averaged.y += normal.getY(i)
+      averaged.z += normal.getZ(i)
+      for (const [bone, weight] of vertices[i]!.weights) {
+        shared.set(bone, (shared.get(bone) ?? 0) + weight)
+      }
+    }
+    if (averaged.lengthSq() > 1e-12) averaged.normalize()
+
+    const strongest = [...shared.entries()].sort((a, b) => b[1] - a[1]).slice(0, MAX_INFLUENCES)
+    const total = strongest.reduce((sum, [, weight]) => sum + weight, 0) || 1
+
+    for (const i of group) {
+      normal.setXYZ(i, averaged.x, averaged.y, averaged.z)
+      for (let slot = 0; slot < MAX_INFLUENCES; slot++) {
+        const entry = strongest[slot]
+        indices.setComponent(i, slot, entry ? entry[0] : 0)
+        weights.setComponent(i, slot, entry ? entry[1] / total : 0)
+      }
+    }
+  }
+
+  normal.needsUpdate = true
+  weights.needsUpdate = true
+  indices.needsUpdate = true
 }
 
 function parentBone(bone: THREE.Bone): THREE.Bone | null {

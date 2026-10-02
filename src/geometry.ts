@@ -283,11 +283,22 @@ export interface Profile {
   yaw?(t: number): number
 }
 
-/** Samples a profile into the sections a prism is built from. */
-export function sample(profile: Profile, length: number, bands: number): Section[] {
+/**
+ * Samples a profile into the sections a prism is built from.
+ *
+ * `cluster` pulls the samples toward both ends of the part. A surface can only
+ * bend where it has vertices, and the place it needs to bend is the joint — so
+ * a part that will be skinned puts its rings near its ends rather than spacing
+ * them evenly down its length.
+ */
+export function sample(profile: Profile, length: number, bands: number, cluster = 0): Section[] {
   const steps = Math.max(1, Math.round(bands))
+  const pull = Math.min(1, Math.max(0, cluster))
+
   return Array.from({ length: steps + 1 }, (_, i) => {
-    const t = i / steps
+    const even = i / steps
+    const eased = 0.5 - 0.5 * Math.cos(Math.PI * even)
+    const t = even + (eased - even) * pull
     return {
       y: t * length,
       rx: profile.rx(t),
@@ -310,13 +321,15 @@ export interface Resolution {
   bands(base: number): number
   /** How many elements to repeat along a run — ridge plates, tail segments. */
   repeats(base: number): number
+  /** How hard to pull a part's bands toward its ends. */
+  cluster: number
 }
 
 /**
  * `edge` runs soft to sharp. A soft creature gets more corners around each
  * cross-section; a sharp one gets few, so its facets read as planes.
  */
-export function resolutionFor(detail: number, edge = 0.5): Resolution {
+export function resolutionFor(detail: number, edge = 0.5, bending = false): Resolution {
   const level = Math.min(1, Math.max(0, Number.isFinite(detail) ? detail : 0.5))
   const hardness = Math.min(1, Math.max(0, Number.isFinite(edge) ? edge : 0.5))
   const sideScale = (0.6 + level * 1.4) * (1.42 - hardness * 0.84)
@@ -324,8 +337,10 @@ export function resolutionFor(detail: number, edge = 0.5): Resolution {
 
   return {
     sides: (base) => Math.max(3, Math.min(14, Math.round(base * sideScale))),
-    bands: (base) => Math.max(1, Math.min(12, Math.round(base * bandScale))),
+    // A part that has to bend needs rings to bend with, so it gets more.
+    bands: (base) => Math.max(bending ? 4 : 1, Math.min(14, Math.round(base * bandScale) + (bending ? 2 : 0))),
     repeats: (base) => Math.max(1, Math.min(16, Math.round(base * (0.6 + level * 1.2)))),
+    cluster: bending ? 0.85 : 0,
   }
 }
 

@@ -66,7 +66,7 @@ const lerp = (a: number, b: number, t: number) => a + (b - a) * t
 
 export function generate(input: CreatureSpec): Creature {
   const spec = clampSpec(input)
-  const res = resolutionFor(spec.detail.level, spec.shape.edge)
+  const res = resolutionFor(spec.detail.level, spec.shape.edge, spec.body.mesh === 'skinned')
   const radial = spec.body.mutation === 'radial'
   const segmented = spec.body.mutation === 'segmented'
   const coiled = spec.body.mutation === 'coiled'
@@ -595,7 +595,7 @@ export function generate(input: CreatureSpec): Creature {
 
   // ─── weld into one skin, if that is the mode ──────────────────────────────
   if (bound) {
-    const skin = buildSkin({ root, bones, pieces, material })
+    const skin = buildSkin({ root, bones, pieces, material, fuse: dims.torsoW * 0.085 })
     geometries.push(skin.geometry)
   }
 

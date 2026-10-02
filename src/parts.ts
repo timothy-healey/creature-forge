@@ -127,7 +127,7 @@ export function segment(forge: Forge, segments: number, index: number, count: nu
           yaw: (t) => t * 0.2,
         },
         length,
-        res.bands(2),
+        res.bands(2), res.cluster,
       ),
       shape: section(shape, 0.88 + shape.bulk * 0.62),
       colors: { side: palette.body, belly: palette.belly, cap: palette.belly },
@@ -209,7 +209,7 @@ export function face(forge: Forge, type: CreatureSpec['head']['type']): Placed[]
                 dz: (t) => dims.headH * 0.09 * t * t,
               },
               dims.headLen,
-              res.bands(2),
+              res.bands(2), res.cluster,
             ),
             shape: section(shape, 0.8),
             colors: { side: palette.body, belly: palette.belly, cap: palette.belly },
@@ -234,7 +234,7 @@ export function face(forge: Forge, type: CreatureSpec['head']['type']): Placed[]
                 dz: (t) => dims.headH * 0.17 * t ** 1.4,
               },
               dims.headLen * 1.3,
-              res.bands(2),
+              res.bands(2), res.cluster,
             ),
             shape: section(shape, 0.7),
             colors: { side: palette.accent },
@@ -258,7 +258,7 @@ export function face(forge: Forge, type: CreatureSpec['head']['type']): Placed[]
             dz: (t) => dims.headH * 0.05 * t,
           },
           dims.headLen * 0.55,
-          res.bands(2),
+          res.bands(2), res.cluster,
         ),
         shape: section(shape, 1.1),
         colors: { side: palette.body, belly: palette.belly, cap: palette.belly },
@@ -333,7 +333,7 @@ export function horns({ dims, palette, res, shape }: Forge, count: number): Plac
           yaw: (t) => t * 0.5,
         },
         length,
-        res.bands(2),
+        res.bands(2), res.cluster,
       ),
       shape: section(shape, 0.9),
       colors: { side: palette.accent },
@@ -357,7 +357,7 @@ export function ear({ dims, palette, res, shape }: Forge, type: CreatureSpec['he
         sections: sample(
           { rx: (t) => width * (1 - t) ** 0.7, rz: (t) => width * 0.42 * (1 - t) ** 0.7 },
           dims.headW * 0.6,
-          res.bands(2),
+          res.bands(2), res.cluster,
         ),
         shape: section(shape, 0.8),
         colors: { side: palette.body, cap: palette.belly },
@@ -378,7 +378,7 @@ export function ear({ dims, palette, res, shape }: Forge, type: CreatureSpec['he
             dz: (t) => dims.headW * 0.32 * t * t,
           },
           dims.headW * 1.5,
-          res.bands(3),
+          res.bands(3), res.cluster,
         ),
         shape: section(shape, 0.85),
         colors: { side: palette.body, belly: palette.belly, cap: palette.belly },
@@ -420,9 +420,15 @@ export function limb(
 ): THREE.BufferGeometry {
   const peak = 0.3 + shape.bulk * 0.4
   const swell = bulge - Math.max(near, far)
+  // A bound limb flares where it meets the body, so it reads as growing out of
+  // it rather than being posted into it. An unbound one has nothing to hide:
+  // its seam is the look.
+  const collar = (t: number) => 1 + embed * 2.1 * Math.max(0, (t - 0.72) / 0.28) ** 1.4
+  const width = (t: number) => (far + (near - far) * t + swell * hump(t, peak)) * collar(t)
+
   const profile: Profile = {
-    rx: (t) => (far + (near - far) * t + swell * hump(t, peak)) * shape.wide,
-    rz: (t) => (far + (near - far) * t + swell * hump(t, peak)) * shape.deep,
+    rx: (t) => width(t) * shape.wide,
+    rz: (t) => width(t) * shape.deep,
     yaw: (t) => hump(t, peak) * 0.22,
   }
 
@@ -450,7 +456,7 @@ export function foot({ dims, palette, res, shape }: Forge, height: number): THRE
           dz: (t) => -height * 0.2 * t,
         },
         length,
-        res.bands(2),
+        res.bands(2), res.cluster,
       ),
       shape: section(shape, 0.8),
       colors: { side: palette.body, cap: palette.accent },
@@ -465,7 +471,7 @@ export function hand({ palette, res, shape }: Forge, thickness: number): THREE.B
       sections: sample(
         { rx: taper(thickness * 0.5, thickness * 0.42), rz: taper(thickness * 0.58, thickness * 0.46) },
         thickness * 0.85,
-        res.bands(1),
+        res.bands(1), res.cluster,
       ),
       shape: section(shape, 1.2),
       colors: { side: palette.accent },
@@ -496,7 +502,7 @@ export function ridgeElement(
         sections: sample(
           { rx: (t) => dims.torsoW * 0.05 * (1 - t) ** 0.8, rz: (t) => dims.torsoW * 0.05 * (1 - t) ** 0.8 },
           height,
-          res.bands(1),
+          res.bands(1), res.cluster,
         ),
         shape: section(shape, 1),
         colors: { side: palette.accent },
@@ -559,7 +565,7 @@ export function wing({ dims, palette, res, shape }: Forge, type: CreatureSpec['w
         sections: sample(
           { rx: (t) => thickness * (1 - 0.6 * t), rz: (t) => thickness * (1 - 0.6 * t) },
           length,
-          res.bands(1),
+          res.bands(1), res.cluster,
         ),
         shape: section(shape, 1),
         colors: { side: palette.accent },
@@ -598,7 +604,7 @@ export function tailSegment(
           yaw: (t) => t * 0.25,
         },
         length,
-        res.bands(2),
+        res.bands(2), res.cluster,
       ),
       shape: section(shape, 1.1),
       colors: { side: palette.body, belly: palette.belly, cap: palette.body },
@@ -623,7 +629,7 @@ export function tailTip(
             rz: (t) => radius * (0.8 + 1.6 * Math.sin(Math.PI * t)) * shape.deep,
           },
           radius * 3.4,
-          res.bands(3),
+          res.bands(3), res.cluster,
         ),
         shape: section(shape, 1),
         colors: { side: palette.accent, cap: palette.accent },
@@ -693,7 +699,7 @@ export function strut({ palette, res, shape }: Forge, length: number, thickness:
     sections: sample(
       { rx: (t) => thickness * (1 - 0.25 * Math.sin(Math.PI * t)), rz: (t) => thickness * (1 - 0.25 * Math.sin(Math.PI * t)) },
       length,
-      res.bands(1),
+      res.bands(1), res.cluster,
     ),
     shape: section(shape, 1),
     colors: { side: palette.body, cap: palette.body },
@@ -707,7 +713,7 @@ export function knuckle({ palette, res, shape }: Forge, radius: number, accent =
     sections: sample(
       { rx: (t) => radius * (0.35 + 0.95 * Math.sin(Math.PI * t)), rz: (t) => radius * (0.35 + 0.95 * Math.sin(Math.PI * t)) },
       radius * 2,
-      res.bands(2),
+      res.bands(2), res.cluster,
     ),
     shape: section(shape, 1),
     colors: { side: accent ? palette.accent : palette.belly, cap: accent ? palette.accent : palette.belly },

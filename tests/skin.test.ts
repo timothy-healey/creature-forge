@@ -21,8 +21,11 @@ function meshesIn(root: THREE.Object3D): THREE.Mesh[] {
 }
 
 function theSkin(spec: CreatureSpec): THREE.SkinnedMesh {
-  const found = meshesIn(generate(spec).root)
-  return found[0] as THREE.SkinnedMesh
+  return meshesIn(generate(spec).root)[0] as THREE.SkinnedMesh
+}
+
+function theSkinOf(creature: ReturnType<typeof generate>): THREE.SkinnedMesh {
+  return meshesIn(creature.root)[0] as THREE.SkinnedMesh
 }
 
 describe('a skinned creature', () => {
@@ -145,5 +148,61 @@ describe('the two mesh modes', () => {
 
       expect(generate(spec).triangleCount, spec.body.mesh).toBeGreaterThan(0)
     }
+  })
+})
+
+describe('how much a skinned creature actually bends', () => {
+  const skin = (): THREE.SkinnedMesh => theSkin(skinned())
+
+  test('hands most of its surface to more than one bone', () => {
+    const weights = skin().geometry.getAttribute('skinWeight')
+
+    let blended = 0
+    for (let i = 0; i < weights.count; i++) if (weights.getY(i) > 0.02) blended++
+
+    expect(blended / weights.count).toBeGreaterThan(0.6)
+  })
+
+  test('blends hard enough to be visible, not just present', () => {
+    const weights = skin().geometry.getAttribute('skinWeight')
+
+    let total = 0
+    let counted = 0
+    for (let i = 0; i < weights.count; i++) {
+      const second = weights.getY(i)
+      if (second > 0.02) {
+        total += second
+        counted++
+      }
+    }
+
+    expect(total / counted).toBeGreaterThan(0.25)
+  })
+
+  test('bends rather than hinges: a joint moves its surface by degrees', () => {
+    const creature = generate(skinned())
+    const mesh = theSkinOf(creature)
+    creature.root.updateMatrixWorld(true)
+
+    const position = mesh.geometry.getAttribute('position')
+    const sample = (i: number) =>
+      mesh.applyBoneTransform(i, new THREE.Vector3().fromBufferAttribute(position, i))
+
+    const taken = Array.from({ length: 300 }, (_, i) => Math.floor((i * position.count) / 300))
+    const before = taken.map((i) => sample(i).clone())
+    creature.joints.backLowerL!.rotation.x += 0.8
+    creature.root.updateMatrixWorld(true)
+    const after = taken.map((i) => sample(i))
+
+    const shifts = before.map((point, i) => point.distanceTo(after[i]!)).filter((d) => d > 1e-5)
+    const partial = shifts.filter((d) => d < Math.max(...shifts) * 0.7)
+
+    // A rigid stack moves a part or it does not. A skin moves it by degrees.
+    expect(shifts.length).toBeGreaterThan(5)
+    expect(partial.length).toBeGreaterThan(2)
+  })
+
+  test('spends more geometry than the jointed build, because a bend needs rings to bend with', () => {
+    expect(generate(skinned()).triangleCount).toBeGreaterThan(generate(defaultSpec()).triangleCount)
   })
 })
