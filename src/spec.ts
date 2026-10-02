@@ -126,3 +126,42 @@ export function clampSpec(spec: CreatureSpec): CreatureSpec {
 
   return out
 }
+
+const PALETTES: readonly CreatureSpec['colors'][] = [
+  { body: '#7b4fbf', belly: '#e8c45a', accent: '#e07a2f', eye: '#1a1420' },
+  { body: '#d9622b', belly: '#f0d9a8', accent: '#6b4a2f', eye: '#241a12' },
+  { body: '#3f8f6a', belly: '#cfe3a8', accent: '#e8d24a', eye: '#10201a' },
+  { body: '#4a6fd0', belly: '#b8d4f0', accent: '#f0f0f0', eye: '#101828' },
+  { body: '#c23f5e', belly: '#f2c0a8', accent: '#2f2434', eye: '#1c1018' },
+  { body: '#8a8f99', belly: '#d8dce2', accent: '#f08a3c', eye: '#14181e' },
+  { body: '#6f3f8f', belly: '#9fd9c0', accent: '#e8e05a', eye: '#1a1024' },
+  { body: '#2f6f7f', belly: '#e0c8a0', accent: '#d94f3f', eye: '#0e1a1e' },
+]
+
+/**
+ * Rolls a whole creature. Takes its randomness as an argument rather than
+ * reaching for `Math.random`, so a roll can be replayed exactly.
+ *
+ * Sliders are biased toward their middle by averaging two rolls: a creature
+ * with every proportion at an extreme is a mess, and the interesting shapes
+ * live in the broad middle with one or two features pushed out.
+ */
+export function randomSpec(random: () => number = Math.random): CreatureSpec {
+  const pick = <T>(options: readonly T[]): T => options[Math.floor(random() * options.length)] ?? options[0]!
+  const biased = () => (random() + random()) / 2
+
+  const spec: CreatureSpec = {
+    head: { type: pick(HEAD_TYPES), length: biased(), width: biased(), horns: pick(HORN_COUNTS) },
+    torso: { height: biased(), width: biased(), depth: biased() },
+    arms: { length: biased(), thickness: biased() },
+    legs: { type: pick(LEG_TYPES), length: biased(), thickness: biased() },
+    tail: { type: pick(TAIL_TYPES) },
+    colors: { ...pick(PALETTES) },
+  }
+
+  // One feature pushed to an extreme is what makes a roll memorable.
+  const exaggerated = pick(SLIDERS)
+  writeSlider(spec, exaggerated.path, random() < 0.5 ? random() * 0.18 : 0.82 + random() * 0.18)
+
+  return spec
+}

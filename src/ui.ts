@@ -7,6 +7,7 @@ import {
   LEG_TYPES,
   SLIDERS,
   TAIL_TYPES,
+  randomSpec,
   readSlider,
   writeSlider,
   type CreatureSpec,
@@ -22,10 +23,21 @@ export interface UiHandlers {
   onGaitChange(gait: Gait): void
 }
 
+/**
+ * Builds the panel for a spec. Rolling a new creature rebuilds the whole panel
+ * rather than hunting down each control to update it — the panel is cheap, and
+ * one code path means a rolled value can never disagree with its slider.
+ */
 export function mountControls(panel: HTMLElement, spec: CreatureSpec, handlers: UiHandlers): void {
   const changed = () => handlers.onSpecChange(spec)
+  panel.replaceChildren()
 
   panel.append(
+    rollButton(() => {
+      const rolled = randomSpec()
+      mountControls(panel, rolled, handlers)
+      handlers.onSpecChange(rolled)
+    }),
     choiceGroup('Gait', GAITS, 'idle', (gait) => handlers.onGaitChange(gait)),
     section('Head', [
       choiceGroup('Shape', HEAD_TYPES, spec.head.type, (type) => {
@@ -63,6 +75,15 @@ export function mountControls(panel: HTMLElement, spec: CreatureSpec, handlers: 
       ),
     ),
   )
+}
+
+function rollButton(onRoll: () => void): HTMLElement {
+  const button = document.createElement('button')
+  button.type = 'button'
+  button.className = 'roll'
+  button.textContent = 'Randomise'
+  button.addEventListener('click', onRoll)
+  return button
 }
 
 function slidersFor(group: string, spec: CreatureSpec, changed: () => void): HTMLElement[] {

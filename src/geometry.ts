@@ -1,142 +1,190 @@
 import * as THREE from 'three'
 
 /**
- * One primitive builds every body part: a box whose top face can differ in size
- * from its bottom. Torso, limb, snout, horn and tail segment are all the same
- * shape with different numbers.
+ * One primitive builds every body part: a prism defined by cross-sections
+ * stacked along Y, with any number of sides, and an end that can collapse to a
+ * point.
  *
- * Geometry is non-indexed on purpose. Flat shading wants unshared vertices, and
- * unshared vertices let each face carry its own colour — which is the whole
- * palette system, with no texture anywhere.
+ * Why not boxes. A box is six flat quads, and under flat shading each one reads
+ * as a slab — which is not what models of this era looked like. They were
+ * faceted: five- and six-sided limbs, wedge-shaped skulls, horns and tails
+ * ending in actual points. Just as important, every quad here is split into two
+ * triangles, and as soon as a section is tapered or twisted that quad stops
+ * being planar — so the diagonal seam shows. That visible diagonal is most of
+ * the look.
  *
- * The box sits on the origin and grows up: y runs 0..height.
+ * Geometry is non-indexed on purpose: flat shading wants unshared vertices, and
+ * unshared vertices let each face carry its own colour, which is the whole
+ * palette system with no texture anywhere.
  */
 
-type V3 = readonly [number, number, number]
-
-/** Face order used by the `colors` array. */
-export const FACES = ['front', 'back', 'right', 'left', 'top', 'bottom'] as const
-export type Face = (typeof FACES)[number]
-
-export interface BoxOptions {
-  /** Width and depth of the bottom face. */
-  bottom: readonly [number, number]
-  /** Width and depth of the top face. */
-  top: readonly [number, number]
-  height: number
-  /** One colour for the whole box, or one per face in `FACES` order. */
-  colors: THREE.Color | readonly THREE.Color[]
+/** One cross-section. `rx` and `rz` are half-width and half-depth, not radii. */
+export interface Section {
+  y: number
+  rx: number
+  rz: number
+  /** Shifts this section off the axis — a chest that leans, a snout that droops. */
+  dx?: number
+  dz?: number
+  /** Twists this section, which stops its quads being planar. */
+  yaw?: number
 }
 
-const MIN_EXTENT = 0.004
-
-/** Keeps a slider at zero from collapsing a part into a degenerate sliver. */
-function floor(value: number): number {
-  return Math.max(MIN_EXTENT, value)
+export interface PrismColors {
+  side: THREE.Color
+  /** The flat ends. Defaults to `side`. */
+  cap?: THREE.Color
+  /** Painted on the faces that point forward — a belly stripe without a texture. */
+  belly?: THREE.Color
 }
 
-export function taperedBox(options: BoxOptions): THREE.BufferGeometry {
-  const bw = floor(options.bottom[0])
-  const bd = floor(options.bottom[1])
-  const tw = floor(options.top[0])
-  const td = floor(options.top[1])
-  const h = floor(options.height)
+export interface PrismOptions {
+  sides: number
+  sections: readonly Section[]
+  colors: PrismColors
+  /** Collapses one end into a single point: a horn, a beak, the end of a tail. */
+  tip?: 'top' | 'bottom'
+  /** How far round from front the belly colour reaches, in radians. */
+  bellyWidth?: number
+}
 
-  const b0: V3 = [-bw / 2, 0, -bd / 2]
-  const b1: V3 = [bw / 2, 0, -bd / 2]
-  const b2: V3 = [bw / 2, 0, bd / 2]
-  const b3: V3 = [-bw / 2, 0, bd / 2]
-  const t0: V3 = [-tw / 2, h, -td / 2]
-  const t1: V3 = [tw / 2, h, -td / 2]
-  const t2: V3 = [tw / 2, h, td / 2]
-  const t3: V3 = [-tw / 2, h, td / 2]
+const TAU = Math.PI * 2
+const MIN_EXTENT = 0.003
+const DEFAULT_BELLY_WIDTH = 0.8
 
-  // Wound counter-clockwise seen from outside, so backface culling behaves.
-  const faces: readonly (readonly V3[])[] = [
-    [b3, b2, t2, b3, t2, t3], // front  +Z
-    [b1, b0, t0, b1, t0, t1], // back   -Z
-    [b2, b1, t1, b2, t1, t2], // right  +X
-    [b0, b3, t3, b0, t3, t0], // left   -X
-    [t3, t2, t1, t3, t1, t0], // top    +Y
-    [b0, b1, b2, b0, b2, b3], // bottom -Y
-  ]
+export function prism(options: PrismOptions): THREE.BufferGeometry {
+  const sides = Math.max(3, Math.min(12, Math.round(options.sides)))
+  const sections = options.sections
+  if (sections.length < 2) throw new Error('a prism needs at least two sections')
 
-  const positions = new Float32Array(faces.length * 6 * 3)
-  const colors = new Float32Array(faces.length * 6 * 3)
-  let cursor = 0
+  const unit = unitRing(sides)
+  const sideColor = options.colors.side
+  const capColor = options.colors.cap ?? sideColor
+  const bellyColor = options.colors.belly
+  const bellyWidth = options.bellyWidth ?? DEFAULT_BELLY_WIDTH
 
-  faces.forEach((face, faceIndex) => {
-    const color = faceColor(options.colors, faceIndex)
-    for (const vertex of face) {
-      positions[cursor] = vertex[0]
-      positions[cursor + 1] = vertex[1]
-      positions[cursor + 2] = vertex[2]
-      colors[cursor] = color.r
-      colors[cursor + 1] = color.g
-      colors[cursor + 2] = color.b
-      cursor += 3
+  const positions: number[] = []
+  const colors: number[] = []
+
+  function triangle(a: THREE.Vector3, b: THREE.Vector3, c: THREE.Vector3, color: THREE.Color): void {
+    for (const vertex of [a, b, c]) {
+      positions.push(vertex.x, vertex.y, vertex.z)
+      colors.push(color.r, color.g, color.b)
     }
-  })
+  }
+
+  function vertexAt(section: Section, index: number): THREE.Vector3 {
+    const point = unit[index % sides]!
+    const yaw = section.yaw ?? 0
+    const cos = Math.cos(yaw)
+    const sin = Math.sin(yaw)
+    return new THREE.Vector3(
+      (section.dx ?? 0) + (point.x * cos - point.z * sin) * Math.max(MIN_EXTENT, section.rx),
+      section.y,
+      (section.dz ?? 0) + (point.x * sin + point.z * cos) * Math.max(MIN_EXTENT, section.rz),
+    )
+  }
+
+  function centreOf(section: Section): THREE.Vector3 {
+    return new THREE.Vector3(section.dx ?? 0, section.y, section.dz ?? 0)
+  }
+
+  /** Faces pointing within `bellyWidth` of straight ahead get the belly colour. */
+  function colorForFace(index: number): THREE.Color {
+    if (!bellyColor) return sideColor
+    const facing = (TAU * (index + 1)) / sides
+    const offset = Math.abs(Math.atan2(Math.sin(facing - Math.PI / 2), Math.cos(facing - Math.PI / 2)))
+    return offset <= bellyWidth ? bellyColor : sideColor
+  }
+
+  const first = sections[0]!
+  const last = sections[sections.length - 1]!
+  const tipTop = options.tip === 'top'
+  const tipBottom = options.tip === 'bottom'
+
+  for (let ring = 0; ring < sections.length - 1; ring++) {
+    const lower = sections[ring]!
+    const upper = sections[ring + 1]!
+    const lowerIsTip = tipBottom && ring === 0
+    const upperIsTip = tipTop && ring === sections.length - 2
+
+    for (let i = 0; i < sides; i++) {
+      const color = colorForFace(i)
+
+      if (upperIsTip) {
+        triangle(vertexAt(lower, i), centreOf(upper), vertexAt(lower, i + 1), color)
+        continue
+      }
+      if (lowerIsTip) {
+        triangle(centreOf(lower), vertexAt(upper, i), vertexAt(upper, i + 1), color)
+        continue
+      }
+
+      const a = vertexAt(lower, i)
+      const b = vertexAt(lower, i + 1)
+      const c = vertexAt(upper, i + 1)
+      const d = vertexAt(upper, i)
+      triangle(a, d, c, color)
+      triangle(a, c, b, color)
+    }
+  }
+
+  if (!tipBottom) {
+    const centre = centreOf(first)
+    for (let i = 0; i < sides; i++) {
+      triangle(centre, vertexAt(first, i), vertexAt(first, i + 1), capColor)
+    }
+  }
+  if (!tipTop) {
+    const centre = centreOf(last)
+    for (let i = 0; i < sides; i++) {
+      triangle(centre, vertexAt(last, i + 1), vertexAt(last, i), capColor)
+    }
+  }
 
   const geometry = new THREE.BufferGeometry()
-  geometry.setAttribute('position', new THREE.BufferAttribute(positions, 3))
-  geometry.setAttribute('color', new THREE.BufferAttribute(colors, 3))
+  geometry.setAttribute('position', new THREE.BufferAttribute(new Float32Array(positions), 3))
+  geometry.setAttribute('color', new THREE.BufferAttribute(new Float32Array(colors), 3))
   geometry.computeVertexNormals()
   return geometry
 }
 
-function faceColor(colors: BoxOptions['colors'], index: number): THREE.Color {
-  if (colors instanceof THREE.Color) return colors
-  return colors[index] ?? colors[0] ?? new THREE.Color(0xffffff)
+/**
+ * The cross-section's corners, normalised so that `rx` and `rz` mean half-width
+ * and half-depth whatever the side count — a five-sided limb and a six-sided one
+ * asked for the same thickness come out the same thickness.
+ */
+function unitRing(sides: number): { x: number; z: number }[] {
+  const angles = Array.from({ length: sides }, (_, i) => (TAU * (i + 0.5)) / sides)
+  const cosines = angles.map(Math.cos)
+  const sines = angles.map(Math.sin)
+
+  const spanX = Math.max(...cosines) - Math.min(...cosines)
+  const spanZ = Math.max(...sines) - Math.min(...sines)
+  const midX = (Math.max(...cosines) + Math.min(...cosines)) / 2
+  const midZ = (Math.max(...sines) + Math.min(...sines)) / 2
+
+  return angles.map((_, i) => ({
+    x: ((cosines[i]! - midX) * 2) / spanX,
+    z: ((sines[i]! - midZ) * 2) / spanZ,
+  }))
 }
 
-/** A limb segment hanging downward from its origin: `near` sits at the joint. */
-export function limbBox(options: {
-  near: readonly [number, number]
-  far: readonly [number, number]
-  length: number
-  colors: BoxOptions['colors']
-}): THREE.BufferGeometry {
-  const geometry = taperedBox({
-    bottom: options.far,
-    top: options.near,
-    height: options.length,
-    colors: options.colors,
-  })
-  geometry.translate(0, -options.length, 0)
-  return geometry
-}
-
-/** A box pointing forward (+Z) from its origin: snouts, beaks, feet. */
-export function forwardBox(options: {
-  base: readonly [number, number]
-  tip: readonly [number, number]
-  length: number
-  colors: BoxOptions['colors']
-}): THREE.BufferGeometry {
-  const geometry = taperedBox({
-    bottom: options.base,
-    top: options.tip,
-    height: options.length,
-    colors: options.colors,
-  })
+/** Swings a part so it points forward (+Z): snouts, beaks, feet. */
+export function pointForward(geometry: THREE.BufferGeometry): THREE.BufferGeometry {
   geometry.rotateX(Math.PI / 2)
   return geometry
 }
 
-/** A box pointing backward (-Z) from its origin: tail segments. */
-export function backwardBox(options: {
-  base: readonly [number, number]
-  tip: readonly [number, number]
-  length: number
-  colors: BoxOptions['colors']
-}): THREE.BufferGeometry {
-  const geometry = taperedBox({
-    bottom: options.base,
-    top: options.tip,
-    height: options.length,
-    colors: options.colors,
-  })
+/** Swings a part so it points backward (-Z): tail segments. */
+export function pointBackward(geometry: THREE.BufferGeometry): THREE.BufferGeometry {
   geometry.rotateX(-Math.PI / 2)
+  return geometry
+}
+
+/** Hangs a part below its origin, so a limb swings from its top end. */
+export function hangDown(geometry: THREE.BufferGeometry): THREE.BufferGeometry {
+  geometry.computeBoundingBox()
+  geometry.translate(0, -geometry.boundingBox!.max.y, 0)
   return geometry
 }
