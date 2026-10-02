@@ -21,8 +21,85 @@ import type { Creature } from './generate'
 export const RENDER_MODES = ['lit', 'unlit', 'toon', 'normals', 'wireframe', 'xray', 'silhouette'] as const
 export type RenderMode = (typeof RENDER_MODES)[number]
 
+export const BACKGROUNDS = ['void', 'dusk', 'grid', 'snow', 'cave', 'studio'] as const
+export type Background = (typeof BACKGROUNDS)[number]
+
+/**
+ * Somewhere to stand. Each one sets its own sky, fog, ground and lighting —
+ * changing only the backdrop colour reads as a different swatch, not a
+ * different place.
+ */
+export interface Scenery {
+  /** Horizon and zenith; a flat sky uses the same colour twice. */
+  sky: readonly [string, string]
+  ground: string | null
+  fog: readonly [number, number] | null
+  key: string
+  fill: string
+  brightness: number
+  grid: string | null
+}
+
+export const SCENERY: Record<Background, Scenery> = {
+  void: {
+    sky: ['#1b1726', '#1b1726'],
+    ground: '#2e2740',
+    fog: [3.4, 9],
+    key: '#fff0dd',
+    fill: '#6f7bd0',
+    brightness: 1,
+    grid: null,
+  },
+  dusk: {
+    sky: ['#e8794a', '#1d1b3a'],
+    ground: '#2a2135',
+    fog: [2.6, 11],
+    key: '#ffb070',
+    fill: '#5a6bd0',
+    brightness: 1.05,
+    grid: null,
+  },
+  grid: {
+    sky: ['#07090f', '#07090f'],
+    ground: null,
+    fog: [4, 16],
+    key: '#9fe8ff',
+    fill: '#3050a0',
+    brightness: 0.85,
+    grid: '#2f6d8a',
+  },
+  snow: {
+    sky: ['#cfe4f2', '#7ca8d8'],
+    ground: '#e8eef5',
+    fog: [5, 18],
+    key: '#ffffff',
+    fill: '#b8d0ea',
+    brightness: 1.3,
+    grid: null,
+  },
+  cave: {
+    sky: ['#0b0a0e', '#0b0a0e'],
+    ground: '#2a211c',
+    fog: [1.6, 6.5],
+    key: '#ffa94a',
+    fill: '#2a3550',
+    brightness: 0.9,
+    grid: null,
+  },
+  studio: {
+    sky: ['#d8d6dd', '#d8d6dd'],
+    ground: '#b9b6c2',
+    fog: null,
+    key: '#ffffff',
+    fill: '#c8ccdd',
+    brightness: 1.15,
+    grid: null,
+  },
+}
+
 export interface ViewSettings {
   render: RenderMode
+  background: Background
   /** 0 is a handful of pixels tall, 1 is a modern crisp image. */
   pixels: number
   /** 0 is violently unstable, 1 is rock steady. */
@@ -30,11 +107,32 @@ export interface ViewSettings {
 }
 
 export function defaultView(): ViewSettings {
-  return { render: 'lit', pixels: 0.42, wobble: 0.3 }
+  return { render: 'lit', background: 'void', pixels: 0.42, wobble: 0.3 }
 }
 
-const BACKGROUND = new THREE.Color('#1b1726')
 const snapGrid = new THREE.Vector2(160, 120)
+
+/** A low sky dome, coloured per vertex so a gradient costs no shader. */
+function skyDome(horizon: THREE.Color, zenith: THREE.Color): THREE.Mesh {
+  const geometry = new THREE.SphereGeometry(30, 14, 9)
+  const position = geometry.getAttribute('position')
+  const colours = new Float32Array(position.count * 3)
+  const blend = new THREE.Color()
+
+  for (let i = 0; i < position.count; i++) {
+    const height = Math.min(1, Math.max(0, position.getY(i) / 30 + 0.12))
+    blend.copy(horizon).lerp(zenith, height ** 0.6)
+    colours[i * 3] = blend.r
+    colours[i * 3 + 1] = blend.g
+    colours[i * 3 + 2] = blend.b
+  }
+
+  geometry.setAttribute('color', new THREE.BufferAttribute(colours, 3))
+  return new THREE.Mesh(
+    geometry,
+    new THREE.MeshBasicMaterial({ vertexColors: true, side: THREE.BackSide, fog: false }),
+  )
+}
 
 /**
  * Remembers what the meshes are currently wearing.
@@ -72,8 +170,6 @@ export function createViewport(canvas: HTMLCanvasElement): Viewport {
   renderer.setPixelRatio(1)
 
   const scene = new THREE.Scene()
-  scene.background = BACKGROUND
-  scene.fog = new THREE.Fog(BACKGROUND, 3.4, 9)
 
   const camera = new THREE.PerspectiveCamera(42, 4 / 3, 0.1, 50)
   camera.position.set(1.9, 1.5, 2.9)
@@ -86,13 +182,62 @@ export function createViewport(canvas: HTMLCanvasElement): Viewport {
   controls.maxPolarAngle = Math.PI * 0.52
   controls.target.set(0, 0.8, 0)
 
-  scene.add(new THREE.AmbientLight(0xffffff, 1.5))
+  const ambient = new THREE.AmbientLight(0xffffff, 1.5)
+  scene.add(ambient)
   const key = new THREE.DirectionalLight(0xfff0dd, 2.2)
   key.position.set(2.5, 4, 3)
   scene.add(key)
   const rim = new THREE.DirectionalLight(0x6f7bd0, 1.1)
   rim.position.set(-3, 2, -2.5)
   scene.add(rim)
+
+  let sky: THREE.Mesh | null = null
+  let grid: THREE.GridHelper | null = null
+  let standing: Background | null = null
+
+  /** Rebuilds the place the creature is standing in. */
+  function setScenery(kind: Background): void {
+    if (standing === kind) return
+    standing = kind
+    const place = SCENERY[kind]
+
+    const horizon = new THREE.Color(place.sky[0])
+    const zenith = new THREE.Color(place.sky[1])
+    scene.background = horizon
+
+    if (sky) {
+      scene.remove(sky)
+      sky.geometry.dispose()
+      ;(sky.material as THREE.Material).dispose()
+      sky = null
+    }
+    if (place.sky[0] !== place.sky[1]) {
+      sky = skyDome(horizon, zenith)
+      scene.add(sky)
+    }
+
+    scene.fog = place.fog ? new THREE.Fog(horizon, place.fog[0], place.fog[1]) : null
+
+    groundMaterial.color.set(place.ground ?? '#000000')
+    ground.visible = place.ground !== null
+
+    if (grid) {
+      scene.remove(grid)
+      grid.dispose()
+      grid = null
+    }
+    if (place.grid) {
+      grid = new THREE.GridHelper(24, 24, place.grid, place.grid)
+      grid.position.y = 0.002
+      scene.add(grid)
+    }
+
+    key.color.set(place.key)
+    rim.color.set(place.fill)
+    ambient.intensity = 1.5 * place.brightness
+    key.intensity = 2.2 * place.brightness
+    rim.intensity = 1.1 * place.brightness
+  }
 
   const groundGeometry = new THREE.PlaneGeometry(26, 26)
   groundGeometry.rotateX(-Math.PI / 2)
@@ -130,7 +275,8 @@ export function createViewport(canvas: HTMLCanvasElement): Viewport {
     skinMaterial?.dispose()
     skinMaterial = next
     wardrobe.wore(view.render, flat)
-    ground.visible = view.render !== 'silhouette' && view.render !== 'xray'
+    // A see-through or blacked-out creature reads better off the floor.
+    ground.visible = SCENERY[view.background].ground !== null && view.render !== 'xray'
   }
 
   function show(next: Creature, nextStance: Stance): void {
@@ -189,13 +335,16 @@ export function createViewport(canvas: HTMLCanvasElement): Viewport {
       view = next
       // There is no "off" for the snap — a steady image is just a fine enough
       // grid that you stop noticing it, so the scale runs exponentially.
-      const grid = 40 * 100 ** Math.min(1, Math.max(0, next.wobble))
-      snapGrid.set(grid, grid * 0.75)
+      const gridSize = 40 * 100 ** Math.min(1, Math.max(0, next.wobble))
+      snapGrid.set(gridSize, gridSize * 0.75)
+      setScenery(next.background)
       dress()
     },
     dispose() {
       running = false
       controls.dispose()
+      grid?.dispose()
+      sky?.geometry.dispose()
       creature?.dispose()
       skinMaterial?.dispose()
       groundGeometry.dispose()

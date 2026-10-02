@@ -1,5 +1,5 @@
 import { GAITS, type Gait } from './animate'
-import { RENDER_MODES, type RenderMode, type ViewSettings } from './render'
+import { BACKGROUNDS, RENDER_MODES, type Background, type RenderMode, type ViewSettings } from './render'
 import {
   COLOR_KEYS,
   COLOR_LABELS,
@@ -88,6 +88,13 @@ function mountModes(
       'Drawn',
       pills(RENDER_MODES, view.render, (render: RenderMode) => {
         view.render = render
+        handlers.onViewChange(view)
+      }),
+    ),
+    bar(
+      'Scene',
+      pills(BACKGROUNDS, view.background, (background: Background) => {
+        view.background = background
         handlers.onViewChange(view)
       }),
     ),

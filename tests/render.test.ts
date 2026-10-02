@@ -1,6 +1,14 @@
 import { describe, expect, test } from 'vitest'
 import * as THREE from 'three'
-import { RENDER_MODES, createWardrobe, defaultView, materialFor, type RenderMode } from '../src/render'
+import {
+  BACKGROUNDS,
+  RENDER_MODES,
+  SCENERY,
+  createWardrobe,
+  defaultView,
+  materialFor,
+  type RenderMode,
+} from '../src/render'
 
 /** What a viewer would actually notice about a material, as a comparable key. */
 function look(material: THREE.Material): string {
@@ -116,5 +124,45 @@ describe('deciding when to re-dress the meshes', () => {
     view.render = 'wireframe'
 
     expect(wardrobe.needsChange(view.render, true)).toBe(true)
+  })
+})
+
+describe('the places a creature can stand', () => {
+  test('every one of them is a different place, not a different swatch', () => {
+    const looks = BACKGROUNDS.map((kind) => {
+      const place = SCENERY[kind]
+      return [place.sky.join(), place.ground, place.fog?.join() ?? 'clear', place.key, place.grid].join('|')
+    })
+
+    expect(new Set(looks).size).toBe(BACKGROUNDS.length)
+  })
+
+  test('each one lights its creature as well as colouring the sky', () => {
+    const keys = new Set(BACKGROUNDS.map((kind) => SCENERY[kind].key))
+    const brightnesses = new Set(BACKGROUNDS.map((kind) => SCENERY[kind].brightness))
+
+    expect(keys.size).toBeGreaterThan(3)
+    expect(brightnesses.size).toBeGreaterThan(2)
+  })
+
+  test('a gradient sky names two colours and a flat one names the same twice', () => {
+    expect(SCENERY.dusk.sky[0]).not.toBe(SCENERY.dusk.sky[1])
+    expect(SCENERY.void.sky[0]).toBe(SCENERY.void.sky[1])
+  })
+
+  test('the grid is the one with no ground under it', () => {
+    expect(SCENERY.grid.ground).toBeNull()
+    expect(SCENERY.grid.grid).not.toBeNull()
+    for (const kind of BACKGROUNDS.filter((k) => k !== 'grid')) {
+      expect(SCENERY[kind].grid, kind).toBeNull()
+    }
+  })
+
+  test('the studio is the one with no fog, so nothing fades out of it', () => {
+    expect(SCENERY.studio.fog).toBeNull()
+  })
+
+  test('the default view starts somewhere', () => {
+    expect(BACKGROUNDS).toContain(defaultView().background)
   })
 })
