@@ -2,7 +2,7 @@ import * as THREE from 'three'
 import { mirrorX, resolutionFor } from './geometry'
 import { type RestMap, type RestPose, rest } from './joints'
 import * as parts from './parts'
-import { deform, type DeformPart } from './mutate'
+import { DEFORMATIONS, deform, type DeformPart, type Deformation } from './mutate'
 import { buildSkin, type SkinPiece } from './skin'
 import { type CreatureSpec, clampSpec } from './spec'
 
@@ -536,10 +536,10 @@ export function generate(input: CreatureSpec): Creature {
   }
 
   // ─── deform, before anything is welded, so it composes with both modes ───
-  if (spec.body.mutation === 'shattered' || spec.body.mutation === 'melted') {
+  if (DEFORMATIONS.includes(spec.body.mutation as Deformation)) {
     root.updateMatrixWorld(true)
     const standing = new THREE.Box3().setFromObject(root)
-    deform(spec.body.mutation, deformable, {
+    deform(spec.body.mutation as Deformation, deformable, {
       scale: dims.torsoW,
       ground: Number.isFinite(standing.min.y) ? standing.min.y : 0,
     })

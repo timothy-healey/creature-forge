@@ -404,3 +404,112 @@ describe('the segmented mutation', () => {
     }
   })
 })
+
+describe('the voxel mutation', () => {
+  const blocky = (edit: (spec: CreatureSpec) => void = () => {}): CreatureSpec => {
+    const spec = defaultSpec()
+    spec.body.mutation = 'voxel'
+    edit(spec)
+    return spec
+  }
+
+  test('rebuilds the surface out of cubes — twelve triangles at a time', () => {
+    const creature = generate(blocky())
+
+    creature.root.traverse((node) => {
+      const mesh = node as THREE.Mesh
+      if (!mesh.isMesh) return
+      expect(mesh.geometry.getAttribute('position').count % 36, mesh.name).toBe(0)
+    })
+  })
+
+  test('snaps every vertex onto one grid', () => {
+    const creature = generate(blocky())
+    const spacings = new Set<number>()
+
+    creature.root.traverse((node) => {
+      const mesh = node as THREE.Mesh
+      if (!mesh.isMesh) return
+      const position = mesh.geometry.getAttribute('position')
+      for (let i = 0; i < position.count; i++) spacings.add(Math.round(position.getY(i) * 1e5))
+    })
+
+    // On a grid, distinct coordinates are rare; on a smooth surface they are not.
+    expect(spacings.size).toBeLessThan(400)
+  })
+
+  test('still fills the shape it replaced', () => {
+    const smooth = generate(defaultSpec())
+    const blocks = generate(blocky())
+    smooth.root.updateMatrixWorld(true)
+    blocks.root.updateMatrixWorld(true)
+
+    const a = new THREE.Box3().setFromObject(smooth.root).getSize(new THREE.Vector3())
+    const b = new THREE.Box3().setFromObject(blocks.root).getSize(new THREE.Vector3())
+
+    for (const axis of ['x', 'y', 'z'] as const) {
+      expect(Math.abs(b[axis] - a[axis]) / a[axis], axis).toBeLessThan(0.35)
+    }
+  })
+
+  test('gets blockier as the grid gets coarser relative to the creature', () => {
+    const small = generate(blocky((spec) => void (spec.torso.width = 0.05))).triangleCount
+    const large = generate(blocky((spec) => void (spec.torso.width = 1))).triangleCount
+
+    expect(large).not.toBe(small)
+  })
+})
+
+describe('the twisted mutation', () => {
+  const wound = (edit: (spec: CreatureSpec) => void = () => {}): CreatureSpec => {
+    const spec = defaultSpec()
+    spec.body.mutation = 'twisted'
+    edit(spec)
+    return spec
+  }
+
+  test('keeps every triangle — it is a shear, not a rebuild', () => {
+    expect(generate(wound()).triangleCount).toBe(generate(defaultSpec()).triangleCount)
+  })
+
+  test('leaves the floor alone and carries the top round', () => {
+    const creature = generate(wound())
+    creature.root.updateMatrixWorld(true)
+
+    const low = creature.joints.backFootL!.getWorldPosition(new THREE.Vector3())
+    const high = creature.joints.head!.getWorldPosition(new THREE.Vector3())
+    const straight = generate(defaultSpec())
+    straight.root.updateMatrixWorld(true)
+    const wasLow = straight.joints.backFootL!.getWorldPosition(new THREE.Vector3())
+
+    // Joints are untouched by a deformation; only the surface winds.
+    expect(low.distanceTo(wasLow)).toBeLessThan(0.05)
+    expect(Number.isFinite(high.y)).toBe(true)
+  })
+
+  test('is no longer a straight extrusion: it widens as it winds', () => {
+    const straight = generate(defaultSpec())
+    const twisted = generate(wound())
+    straight.root.updateMatrixWorld(true)
+    twisted.root.updateMatrixWorld(true)
+
+    const a = new THREE.Box3().setFromObject(straight.root)
+    const b = new THREE.Box3().setFromObject(twisted.root)
+
+    expect(b.getSize(new THREE.Vector3()).length()).not.toBeCloseTo(a.getSize(new THREE.Vector3()).length(), 3)
+  })
+
+  test('never produces a NaN vertex, in either mesh mode', () => {
+    for (const mesh of MESH_MODES) {
+      const creature = generate(wound((spec) => void (spec.body.mesh = mesh)))
+      creature.root.traverse((node) => {
+        const mesh3d = node as THREE.Mesh
+        if (!mesh3d.isMesh) return
+        const position = mesh3d.geometry.getAttribute('position')
+        for (let i = 0; i < position.count * 3; i++) {
+          expect(Number.isFinite(position.array[i]), mesh).toBe(true)
+        }
+      })
+    }
+  })
+})

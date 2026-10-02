@@ -137,8 +137,12 @@ export interface DeformContext {
  * tree exists and its world matrices are current, so a deformation can reason
  * about where a vertex actually is rather than only where it is in its own part.
  */
+export type Deformation = 'shattered' | 'melted' | 'voxel' | 'twisted'
+
+export const DEFORMATIONS: readonly Deformation[] = ['shattered', 'melted', 'voxel', 'twisted']
+
 export function deform(
-  mutation: 'shattered' | 'melted',
+  mutation: Deformation,
   parts: readonly DeformPart[],
   context: DeformContext,
 ): void {
@@ -149,12 +153,123 @@ export function deform(
       shatter(part.geometry, context.scale * 0.1)
       continue
     }
+    if (mutation === 'voxel') {
+      voxelise(part.geometry, context.scale * 0.21)
+      continue
+    }
 
     toLocal.copy(part.node.matrixWorld).invert()
+    if (mutation === 'twisted') {
+      twist(part.geometry, part.node.matrixWorld, toLocal, {
+        turns: 0.52,
+        scale: context.scale,
+        ground: context.ground,
+      })
+      continue
+    }
+
     melt(part.geometry, part.node.matrixWorld, toLocal, {
       amount: 0.16,
       scale: context.scale,
       ground: context.ground,
     })
   }
+}
+
+/**
+ * Re-quantises the surface onto a grid. Each triangle surrenders its shape and
+ * leaves behind a cube in whatever cell its centre fell in, so the creature is
+ * rebuilt out of blocks at whatever size the grid is — a different surface
+ * describing the same volume.
+ */
+export function voxelise(geometry: THREE.BufferGeometry, cell: number): void {
+  const position = geometry.getAttribute('position') as THREE.BufferAttribute
+  const color = geometry.getAttribute('color') as THREE.BufferAttribute
+  const points = position.array as Float32Array
+  const tints = color.array as Float32Array
+  const size = Math.max(1e-4, cell)
+
+  const cells = new Map<string, { x: number; y: number; z: number; r: number; g: number; b: number }>()
+
+  for (let triangle = 0; triangle + 8 < points.length; triangle += 9) {
+    const cx = (points[triangle]! + points[triangle + 3]! + points[triangle + 6]!) / 3
+    const cy = (points[triangle + 1]! + points[triangle + 4]! + points[triangle + 7]!) / 3
+    const cz = (points[triangle + 2]! + points[triangle + 5]! + points[triangle + 8]!) / 3
+
+    const ix = Math.round(cx / size)
+    const iy = Math.round(cy / size)
+    const iz = Math.round(cz / size)
+    const key = `${ix},${iy},${iz}`
+    if (cells.has(key)) continue
+
+    cells.set(key, {
+      x: ix * size,
+      y: iy * size,
+      z: iz * size,
+      r: tints[triangle]!,
+      g: tints[triangle + 1]!,
+      b: tints[triangle + 2]!,
+    })
+  }
+
+  const half = size * 0.5
+  const positions: number[] = []
+  const colors: number[] = []
+
+  for (const cube of cells.values()) {
+    for (const face of CUBE_FACES) {
+      for (const corner of face) {
+        positions.push(cube.x + corner[0]! * half, cube.y + corner[1]! * half, cube.z + corner[2]! * half)
+        colors.push(cube.r, cube.g, cube.b)
+      }
+    }
+  }
+
+  geometry.setAttribute('position', new THREE.BufferAttribute(new Float32Array(positions), 3))
+  geometry.setAttribute('color', new THREE.BufferAttribute(new Float32Array(colors), 3))
+  geometry.setIndex(null)
+  geometry.computeVertexNormals()
+  invalidateBounds(geometry)
+}
+
+type Corner = readonly [number, number, number]
+
+/** Twelve triangles, wound outward. */
+const CUBE_FACES: readonly (readonly Corner[])[] = [
+  [[-1, -1, 1], [1, -1, 1], [1, 1, 1], [-1, -1, 1], [1, 1, 1], [-1, 1, 1]],
+  [[1, -1, -1], [-1, -1, -1], [-1, 1, -1], [1, -1, -1], [-1, 1, -1], [1, 1, -1]],
+  [[1, -1, 1], [1, -1, -1], [1, 1, -1], [1, -1, 1], [1, 1, -1], [1, 1, 1]],
+  [[-1, -1, -1], [-1, -1, 1], [-1, 1, 1], [-1, -1, -1], [-1, 1, 1], [-1, 1, -1]],
+  [[-1, 1, 1], [1, 1, 1], [1, 1, -1], [-1, 1, 1], [1, 1, -1], [-1, 1, -1]],
+  [[-1, -1, -1], [1, -1, -1], [1, -1, 1], [-1, -1, -1], [1, -1, 1], [-1, -1, 1]],
+]
+
+/**
+ * Winds the creature around its own vertical axis: the higher a vertex sits, the
+ * further round it is carried. Nothing moves relative to the floor, and nothing
+ * is added or removed — the whole body is sheared into a helix.
+ */
+export function twist(
+  geometry: THREE.BufferGeometry,
+  toWorld: THREE.Matrix4,
+  toLocal: THREE.Matrix4,
+  options: { turns: number; scale: number; ground: number },
+): void {
+  const position = geometry.getAttribute('position') as THREE.BufferAttribute
+  const point = new THREE.Vector3()
+  const up = new THREE.Vector3(0, 1, 0)
+
+  for (let i = 0; i < position.count; i++) {
+    point.fromBufferAttribute(position, i).applyMatrix4(toWorld)
+
+    const above = (point.y - options.ground) / Math.max(1e-6, options.scale)
+    point.applyAxisAngle(up, options.turns * above)
+
+    point.applyMatrix4(toLocal)
+    position.setXYZ(i, point.x, point.y, point.z)
+  }
+
+  position.needsUpdate = true
+  geometry.computeVertexNormals()
+  invalidateBounds(geometry)
 }

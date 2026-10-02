@@ -24,7 +24,15 @@ export type MeshMode = 'jointed' | 'skinned'
  * its symmetry, its topology, what its surface even is — rather than bolting
  * another part onto the same plan.
  */
-export type Mutation = 'none' | 'radial' | 'shattered' | 'melted' | 'strut' | 'segmented'
+export type Mutation =
+  | 'none'
+  | 'radial'
+  | 'shattered'
+  | 'melted'
+  | 'strut'
+  | 'segmented'
+  | 'voxel'
+  | 'twisted'
 export type FrontLimb = 'arms' | 'forelegs'
 export type HeadType = 'snout' | 'beak' | 'blunt' | 'crest'
 export type LegType = 'digitigrade' | 'plantigrade'
@@ -44,6 +52,8 @@ export const MUTATIONS: readonly Mutation[] = [
   'melted',
   'strut',
   'segmented',
+  'voxel',
+  'twisted',
 ]
 export const FRONT_LIMBS: readonly FrontLimb[] = ['arms', 'forelegs']
 export const HEAD_TYPES: readonly HeadType[] = ['snout', 'beak', 'blunt', 'crest']
