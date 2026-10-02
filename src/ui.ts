@@ -187,6 +187,9 @@ function colorRow(label: string, value: string, onInput: (value: string) => void
   return row
 }
 
+/** Past a handful of choices the label stops sharing a line with them. */
+const WIDE_AT = 5
+
 function choiceGroup<T extends string | number>(
   label: string,
   options: readonly T[],
@@ -194,7 +197,7 @@ function choiceGroup<T extends string | number>(
   onPick: (value: T) => void,
 ): HTMLElement {
   const row = document.createElement('div')
-  row.className = 'row'
+  row.className = options.length > WIDE_AT ? 'row wide' : 'row'
 
   const name = document.createElement('span')
   name.textContent = label

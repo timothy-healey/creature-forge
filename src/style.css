@@ -77,7 +77,22 @@ section:first-of-type h2 { margin-top: 10px; }
 
 .row > span { color: var(--dim); font-size: 11px; }
 
+.row.wide {
+  display: block;
+  margin-bottom: 10px;
+}
+
+.row.wide > span {
+  display: block;
+  margin-bottom: 5px;
+}
+
 .choices { display: flex; gap: 4px; flex-wrap: wrap; }
+
+.row.wide .choices {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+}
 
 .choices button {
   flex: 1 1 auto;
