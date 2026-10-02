@@ -790,3 +790,98 @@ describe('the whole mutation set', () => {
     }
   })
 })
+
+describe('the inflated mutation', () => {
+  const swollen = (edit: (spec: CreatureSpec) => void = () => {}): CreatureSpec => {
+    const spec = defaultSpec()
+    spec.body.mutation = 'inflated'
+    edit(spec)
+    return spec
+  }
+
+  test('keeps every triangle — it swells the surface, it does not add to it', () => {
+    expect(generate(swollen()).triangleCount).toBe(generate(defaultSpec()).triangleCount)
+  })
+
+  test('is fatter than the creature it swelled from', () => {
+    const lean = generate(defaultSpec())
+    const fat = generate(swollen())
+    lean.root.updateMatrixWorld(true)
+    fat.root.updateMatrixWorld(true)
+
+    const a = new THREE.Box3().setFromObject(lean.root).getSize(new THREE.Vector3())
+    const b = new THREE.Box3().setFromObject(fat.root).getSize(new THREE.Vector3())
+
+    expect(b.x).toBeGreaterThan(a.x)
+    expect(b.z).toBeGreaterThan(a.z)
+  })
+
+  test('swells unevenly — it is lumpy, not merely scaled', () => {
+    const creature = generate(swollen())
+    const radii: number[] = []
+
+    creature.root.traverse((node) => {
+      const mesh = node as THREE.Mesh
+      if (!mesh.isMesh || mesh.name !== 'torso') return
+      const position = mesh.geometry.getAttribute('position')
+      mesh.geometry.computeBoundingBox()
+      const centre = mesh.geometry.boundingBox!.getCenter(new THREE.Vector3())
+      for (let i = 0; i < position.count; i++) {
+        const point = new THREE.Vector3().fromBufferAttribute(position, i)
+        radii.push(Math.hypot(point.x - centre.x, point.z - centre.z))
+      }
+    })
+
+    const mean = radii.reduce((sum, value) => sum + value, 0) / radii.length
+    const spread = Math.sqrt(radii.reduce((sum, value) => sum + (value - mean) ** 2, 0) / radii.length)
+
+    expect(spread / mean).toBeGreaterThan(0.1)
+  })
+})
+
+describe('the lattice mutation', () => {
+  const caged = (edit: (spec: CreatureSpec) => void = () => {}): CreatureSpec => {
+    const spec = defaultSpec()
+    spec.body.mutation = 'lattice'
+    edit(spec)
+    return spec
+  }
+
+  test('replaces the surface with bars along its own edges', () => {
+    const solid = generate(defaultSpec())
+    const cage = generate(caged())
+
+    // Every edge becomes a four-sided bar, so the count is a multiple of eight.
+    expect(cage.triangleCount % 8).toBe(0)
+    expect(cage.triangleCount).toBeGreaterThan(solid.triangleCount)
+  })
+
+  test('draws a shared edge once rather than twice', () => {
+    const cage = generate(caged())
+    const solid = generate(defaultSpec())
+
+    // Three edges per triangle, but neighbours share them, so well under 3x.
+    expect(cage.triangleCount).toBeLessThan(solid.triangleCount * 3 * 8)
+  })
+
+  test('holds the shape it replaced', () => {
+    const solid = generate(defaultSpec())
+    const cage = generate(caged())
+    solid.root.updateMatrixWorld(true)
+    cage.root.updateMatrixWorld(true)
+
+    const a = new THREE.Box3().setFromObject(solid.root).getSize(new THREE.Vector3())
+    const b = new THREE.Box3().setFromObject(cage.root).getSize(new THREE.Vector3())
+
+    for (const axis of ['x', 'y', 'z'] as const) {
+      expect(Math.abs(b[axis] - a[axis]) / a[axis], axis).toBeLessThan(0.15)
+    }
+  })
+
+  test('gets denser as the creature gets more detailed', () => {
+    const coarse = generate(caged((spec) => void (spec.detail.level = 0))).triangleCount
+    const fine = generate(caged((spec) => void (spec.detail.level = 1))).triangleCount
+
+    expect(fine).toBeGreaterThan(coarse * 2)
+  })
+})

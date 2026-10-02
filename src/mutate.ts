@@ -137,7 +137,14 @@ export interface DeformContext {
  * tree exists and its world matrices are current, so a deformation can reason
  * about where a vertex actually is rather than only where it is in its own part.
  */
-export type Deformation = 'shattered' | 'melted' | 'voxel' | 'twisted' | 'inverted'
+export type Deformation =
+  | 'shattered'
+  | 'melted'
+  | 'voxel'
+  | 'twisted'
+  | 'inverted'
+  | 'inflated'
+  | 'lattice'
 
 export const DEFORMATIONS: readonly Deformation[] = [
   'shattered',
@@ -145,6 +152,8 @@ export const DEFORMATIONS: readonly Deformation[] = [
   'voxel',
   'twisted',
   'inverted',
+  'inflated',
+  'lattice',
 ]
 
 export function deform(
@@ -165,6 +174,14 @@ export function deform(
     }
     if (mutation === 'inverted') {
       invert(part.geometry)
+      continue
+    }
+    if (mutation === 'inflated') {
+      inflate(part.geometry, 0.3, context.scale)
+      continue
+    }
+    if (mutation === 'lattice') {
+      latticeOf(part.geometry, context.scale * 0.022)
       continue
     }
 
@@ -362,6 +379,119 @@ export function invert(geometry: THREE.BufferGeometry): void {
 
   position.needsUpdate = true
   color.needsUpdate = true
+  geometry.computeVertexNormals()
+  invalidateBounds(geometry)
+}
+
+/**
+ * Swells the surface outward from each part's own axis by a lumpy field, so a
+ * limb stops being a taper and becomes a run of bulges. The direction is radial
+ * rather than the face normal: a face normal would push each triangle out on its
+ * own and shatter the thing, where radial keeps the surface whole.
+ */
+export function inflate(geometry: THREE.BufferGeometry, amount: number, scale: number): void {
+  const position = geometry.getAttribute('position') as THREE.BufferAttribute
+  geometry.computeBoundingBox()
+  const centre = geometry.boundingBox!.getCenter(new THREE.Vector3())
+
+  const point = new THREE.Vector3()
+  const away = new THREE.Vector3()
+
+  for (let i = 0; i < position.count; i++) {
+    point.fromBufferAttribute(position, i)
+
+    away.subVectors(point, centre)
+    away.y *= 0.35
+    if (away.lengthSq() < 1e-10) continue
+    away.normalize()
+
+    const lump = noise(point.x * 9, point.y * 9, point.z * 9)
+    point.addScaledVector(away, amount * scale * (0.3 + lump))
+    position.setXYZ(i, point.x, point.y, point.z)
+  }
+
+  position.needsUpdate = true
+  geometry.computeVertexNormals()
+  invalidateBounds(geometry)
+}
+
+/**
+ * Replaces the surface with its own edges: every edge of every triangle becomes
+ * a thin bar, shared edges drawn once. Unlike the armature, which is built from
+ * the joints, this is the mesh's own topology made visible — the creature is a
+ * cage of the shape it used to be.
+ */
+export function latticeOf(geometry: THREE.BufferGeometry, thickness: number): void {
+  const position = geometry.getAttribute('position') as THREE.BufferAttribute
+  const color = geometry.getAttribute('color') as THREE.BufferAttribute
+  const points = position.array as Float32Array
+  const tints = color.array as Float32Array
+
+  const drawn = new Set<string>()
+  const positions: number[] = []
+  const colors: number[] = []
+
+  const key = (a: number, b: number) => {
+    const first = [points[a]!, points[a + 1]!, points[a + 2]!].map((v) => Math.round(v * 1e4)).join(',')
+    const second = [points[b]!, points[b + 1]!, points[b + 2]!].map((v) => Math.round(v * 1e4)).join(',')
+    return first < second ? `${first}|${second}` : `${second}|${first}`
+  }
+
+  const from = new THREE.Vector3()
+  const to = new THREE.Vector3()
+  const along = new THREE.Vector3()
+  const sideways = new THREE.Vector3()
+  const up = new THREE.Vector3()
+  const seed = new THREE.Vector3()
+
+  for (let triangle = 0; triangle + 8 < points.length; triangle += 9) {
+    for (const [a, b] of [
+      [triangle, triangle + 3],
+      [triangle + 3, triangle + 6],
+      [triangle + 6, triangle],
+    ]) {
+      const edge = key(a!, b!)
+      if (drawn.has(edge)) continue
+      drawn.add(edge)
+
+      from.set(points[a!]!, points[a! + 1]!, points[a! + 2]!)
+      to.set(points[b!]!, points[b! + 1]!, points[b! + 2]!)
+      along.subVectors(to, from)
+      if (along.lengthSq() < 1e-10) continue
+      along.normalize()
+
+      seed.set(Math.abs(along.x) < 0.9 ? 1 : 0, Math.abs(along.x) < 0.9 ? 0 : 1, 0)
+      sideways.crossVectors(along, seed).normalize().multiplyScalar(thickness)
+      up.crossVectors(along, sideways).normalize().multiplyScalar(thickness)
+
+      const r = tints[a!]!
+      const g = tints[a! + 1]!
+      const bl = tints[a! + 2]!
+
+      // A square bar: four faces, two triangles each.
+      const corners = [
+        [sideways, up],
+        [up, sideways.clone().negate()],
+        [sideways.clone().negate(), up.clone().negate()],
+        [up.clone().negate(), sideways],
+      ] as const
+
+      for (const [one, two] of corners) {
+        const p0 = from.clone().add(one as THREE.Vector3)
+        const p1 = from.clone().add(two as THREE.Vector3)
+        const p2 = to.clone().add(two as THREE.Vector3)
+        const p3 = to.clone().add(one as THREE.Vector3)
+        for (const vertex of [p0, p1, p2, p0, p2, p3]) {
+          positions.push(vertex.x, vertex.y, vertex.z)
+          colors.push(r, g, bl)
+        }
+      }
+    }
+  }
+
+  geometry.setAttribute('position', new THREE.BufferAttribute(new Float32Array(positions), 3))
+  geometry.setAttribute('color', new THREE.BufferAttribute(new Float32Array(colors), 3))
+  geometry.setIndex(null)
   geometry.computeVertexNormals()
   invalidateBounds(geometry)
 }
