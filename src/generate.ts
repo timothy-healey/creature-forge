@@ -46,7 +46,6 @@ const TAIL_SEGMENTS: Record<CreatureSpec['tail']['type'], number> = {
   fan: 3,
 }
 
-const SHOULDER_ALONG = 0.82
 const TAU = Math.PI * 2
 
 /**
@@ -78,7 +77,6 @@ export function generate(input: CreatureSpec): Creature {
   const branching = spec.body.mutation === 'recursive' ? 1 : 0
   // A ring of limbs has no front to lean into; a chain of them only works flat.
   const pitch = radial ? 0 : segmented ? 1.36 : coiled ? 0.3 : PITCH[spec.body.build]
-  const planted = spec.body.frontLimb === 'forelegs'
   // A part set to none still gets its joints, so a gait never has to ask
   // whether this creature happens to have arms. Only the geometry goes.
   const armless = spec.body.frontLimb === 'none'
@@ -256,6 +254,37 @@ export function generate(input: CreatureSpec): Creature {
     previous = node
   }
 
+  /**
+   * How far below its socket a limb of a given length actually reaches.
+   *
+   * A folded leg does not drop by its own length — a digitigrade one loses a
+   * third of it to the bend — and once the spine curves, the socket is at an
+   * angle too. Rather than solve that in trigonometry, hang a weightless copy
+   * of the chain and measure it: every segment scales together, so one
+   * measurement gives the ratio for any length.
+   */
+  function dropPerLength(socket: THREE.Object3D, pose: RestPose, bend: readonly [number, number]): number {
+    const upper = new THREE.Object3D()
+    upper.rotation.set(pose.rx, pose.ry, pose.rz)
+    const lower = new THREE.Object3D()
+    lower.position.y = -0.52
+    lower.rotation.x = bend[0]
+    const foot = new THREE.Object3D()
+    foot.position.y = -0.48
+    foot.rotation.x = bend[1]
+
+    lower.add(foot)
+    upper.add(lower)
+    socket.add(upper)
+    socket.updateMatrixWorld(true)
+
+    const from = socket.getWorldPosition(new THREE.Vector3()).y
+    const to = foot.getWorldPosition(new THREE.Vector3()).y
+    socket.remove(upper)
+
+    return Math.max(0.05, from - to)
+  }
+
   /** Where a given fraction along the body is, as a bead and a height up it. */
   function alongSpine(fraction: number): { node: THREE.Object3D; y: number } {
     const clamped = Math.min(0.9999, Math.max(0, fraction))
@@ -283,7 +312,18 @@ export function generate(input: CreatureSpec): Creature {
     branch?: number
     /** Joints only, no geometry — this is how a limb is absent. */
     bare?: boolean
+    /** Which side of the body this is, so its profile twists to match. */
+    handed?: number
   }): THREE.Object3D {
+    /**
+     * An odd-sided prism is symmetric about X but not about Z, so a five-sided
+     * limb is chiral however its twist is set. The left side is therefore built
+     * from the right side's geometry, reflected — the only way the two halves
+     * are truly mirror images, which is what makes `asymmetric` mean anything.
+     */
+    const sided = (geometry: THREE.BufferGeometry) =>
+      (options.handed ?? 1) < 0 ? mirrorX(geometry) : geometry
+
     const [upperName, lowerName, footName] = options.names
     const upper = joint(upperName, options.parent, options.at, options.pose)
     if (options.bare) {
@@ -294,38 +334,38 @@ export function generate(input: CreatureSpec): Creature {
     mesh(
       `${upperName}Mesh`,
       upper,
-      parts.limb(
+      sided(parts.limb(
         forge,
         options.upperLen,
         options.thickness * 0.58,
         options.thickness * 0.64,
         options.thickness * 0.44,
-      ),
+      )),
     )
 
     const lower = joint(lowerName, upper, { x: 0, y: -options.upperLen, z: 0 }, rest(options.bend[0]))
     mesh(
       `${lowerName}Mesh`,
       lower,
-      parts.limb(
+      sided(parts.limb(
         forge,
         options.lowerLen,
         options.thickness * 0.46,
         options.thickness * 0.5,
         options.thickness * 0.34,
-      ),
+      )),
     )
 
     const end = joint(footName, lower, { x: 0, y: -options.lowerLen, z: 0 }, rest(options.bend[1]))
     if (options.ending === 'foot') {
       const height = footHeight * (options.footScale ?? 1)
-      mesh(`${footName}Mesh`, end, parts.foot(forge, height), {
+      mesh(`${footName}Mesh`, end, sided(parts.foot(forge, height)), {
         x: 0,
         y: -height * 0.5,
         z: -dims.legThick * 0.45,
       })
     } else {
-      mesh(`${footName}Mesh`, end, parts.hand(forge, options.thickness))
+      mesh(`${footName}Mesh`, end, sided(parts.hand(forge, options.thickness)))
     }
 
     // A limb that branches is a different body from one that is merely longer:
@@ -391,6 +431,8 @@ export function generate(input: CreatureSpec): Creature {
         ending: 'foot',
         branch: branching,
         bare: legless,
+        // A ring has no left or right, so the twist alternates around it.
+        handed: index % 2 === 0 ? 1 : -1,
       })
     }
   } else if (segmented) {
@@ -418,78 +460,74 @@ export function generate(input: CreatureSpec): Creature {
           footScale: 0.8,
           branch: branching,
           bare: legless,
+          handed: side,
         })
       }
     })
   } else {
-    for (const side of [-1, 1]) {
-      const suffix = side < 0 ? 'L' : 'R'
-      limbChain({
-        names: [`backUpper${suffix}`, `backLower${suffix}`, `backFoot${suffix}`],
-        parent: hip,
-        at: { x: side * dims.legThick * 1.05, y: 0, z: 0 },
-        pose: rest(digitigrade ? 0.52 : 0.04),
-        upperLen: thighLen,
-        lowerLen: shinLen,
-        thickness: dims.legThick,
-        bend: [digitigrade ? -1.0 : -0.08, digitigrade ? 0.48 : 0.04],
-        ending: 'foot',
-        branch: branching,
-        bare: legless,
-      })
-    }
-  }
+    /**
+     * Pairs are spread evenly between the hindmost and foremost attachment, and
+     * each one is sized against the floor from wherever it ended up — which is
+     * the only way it can work once the spine bends.
+     *
+     * The hindmost pair and any in between are legs; the foremost takes the
+     * front-limb role, so it can be arms instead. Two slots always exist even
+     * when only one pair is asked for, because the gait's joints have to.
+     */
+    const slots = Math.max(2, spec.limbs.pairs)
+    const sockets = Array.from({ length: slots }, (_, index) => {
+      const fraction = slots === 1 ? spec.limbs.back : index / (slots - 1)
+      const along = spec.limbs.back + (spec.limbs.front - spec.limbs.back) * fraction
+      const at = alongSpine(along)
 
-  // ─── front limbs, sized against the floor the hind feet stand on ──────────
-  if (!radial && !segmented) {
-    const shoulderAt = alongSpine(SHOULDER_ALONG)
-    const shoulderPoses = [-1, 1].map((side) =>
-      planted ? rest(-pitch, 0, side * 0.06) : rest(-0.08 - pitch * 0.3, 0, side * 0.16),
-    )
-    const probes = [-1, 1].map((side, index) =>
-      joint(
-        `frontUpper${side < 0 ? 'L' : 'R'}`,
-        shoulderAt.node,
-        { x: side * torsoW * 0.46, y: shoulderAt.y, z: 0 },
-        shoulderPoses[index]!,
-      ),
-    )
+      const socket = new THREE.Object3D()
+      socket.position.set(0, at.y, 0)
+      at.node.add(socket)
+      return socket
+    })
 
     root.updateMatrixWorld(true)
-    const standing = new THREE.Box3()
-    // A legless creature's ankle joints are still there but hold nothing, and
-    // they hang below where the body actually rests — so the body is the floor.
-    if (legless) standing.setFromObject(root)
-    else for (const suffix of ['L', 'R']) standing.expandByObject(joints[`backFoot${suffix}`]!)
-    // With no geometry to measure — a strut creature has none yet — the ankle
-    // joint itself is where the floor is.
-    const ground = Number.isFinite(standing.min.y)
-      ? standing.min.y
-      : Math.min(...['L', 'R'].map((s) => joints[`backFoot${s}`]!.getWorldPosition(new THREE.Vector3()).y))
-    const shoulderHeight = probes[0]!.getWorldPosition(new THREE.Vector3()).y
+    const perch = new THREE.Vector3()
 
-    // A foreleg is as long as the gap between its shoulder and the floor.
-    const frontLen = planted ? Math.max(0.08, shoulderHeight - ground - footHeight) : armLen
-    const frontThick = planted ? dims.legThick * 0.92 : dims.armThick
+    sockets.forEach((socket, index) => {
+      const foremost = index === slots - 1
+      const live = index < spec.limbs.pairs
+      const asArms = foremost && spec.body.frontLimb === 'arms'
+      const absent = foremost ? armless : legless
 
-    for (const probe of probes) shoulderAt.node.remove(probe)
+      const group = index === 0 ? 'back' : foremost ? 'front' : `limb${index}`
+      const height = socket.getWorldPosition(perch).y
+      const pose = asArms
+        ? rest(-0.08 - pitch * 0.3, 0, 0)
+        : rest(-pitch + (digitigrade ? 0.52 : 0.04), 0, 0)
+      const bend: readonly [number, number] = asArms
+        ? [0.2, 0]
+        : [digitigrade ? -1.0 : -0.08, digitigrade ? 0.48 : 0.04]
+      // Length, not reach: scale it so the foot lands on the floor.
+      const span = asArms
+        ? armLen
+        : Math.max(0.08, (height - footHeight) / dropPerLength(socket, pose, bend))
+      const thickness = asArms ? dims.armThick : dims.legThick * (foremost ? 0.92 : 1)
 
-    ;[-1, 1].forEach((side, index) => {
-      const suffix = side < 0 ? 'L' : 'R'
-      limbChain({
-        names: [`frontUpper${suffix}`, `frontLower${suffix}`, `frontFoot${suffix}`],
-        parent: shoulderAt.node,
-        at: { x: side * torsoW * 0.46, y: shoulderAt.y, z: 0 },
-        pose: shoulderPoses[index]!,
-        upperLen: frontLen * 0.52,
-        lowerLen: frontLen * 0.48,
-        thickness: frontThick,
-        bend: [planted ? 0.12 : 0.2, planted ? 0.04 : 0],
-        ending: planted ? 'foot' : 'hand',
-        footScale: 0.85,
-        branch: branching,
-        bare: armless,
-      })
+      for (const side of [-1, 1]) {
+        const suffix = side < 0 ? 'L' : 'R'
+        limbChain({
+          names: [`${group}Upper${suffix}`, `${group}Lower${suffix}`, `${group}Foot${suffix}`],
+          parent: socket,
+          at: { x: side * (asArms ? torsoW * 0.46 : dims.legThick * 1.05), y: 0, z: 0 },
+          // Counter-rotated against the body's lean, so a limb hangs down.
+          pose: rest(pose.rx, 0, side * (asArms ? 0.16 : 0.06)),
+          upperLen: span * 0.52,
+          lowerLen: span * 0.48,
+          thickness,
+          bend,
+          ending: asArms ? 'hand' : 'foot',
+          footScale: foremost ? 0.85 : 1,
+          branch: branching,
+          bare: absent || !live,
+          handed: side,
+        })
+      }
     })
   }
 

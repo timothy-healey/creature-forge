@@ -185,8 +185,11 @@ describe('eyes you can actually see', () => {
     const creature = generate(spec)
     creature.root.updateMatrixWorld(true)
 
+    // Only the head's own parts count as occluders. An arm placed up by the
+    // jaw can stand in front of an eye, and that is the creature being odd
+    // rather than the skull swallowing its own eyes.
     const meshes: THREE.Mesh[] = []
-    creature.root.traverse((node) => {
+    creature.joints.head!.traverse((node) => {
       if ((node as THREE.Mesh).isMesh) meshes.push(node as THREE.Mesh)
     })
 

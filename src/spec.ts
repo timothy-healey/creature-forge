@@ -53,6 +53,7 @@ export type WingType = 'none' | 'small' | 'large'
 export type HornCount = 0 | 1 | 2
 export type EyeCount = 0 | 2 | 4 | 6
 export type SegmentCount = 2 | 3 | 4 | 5
+export type PairCount = 1 | 2 | 3 | 4
 
 export const BUILDS: readonly Build[] = ['upright', 'hunched', 'quadruped']
 export const MESH_MODES: readonly MeshMode[] = ['jointed', 'skinned']
@@ -100,6 +101,7 @@ export const WING_TYPES: readonly WingType[] = ['none', 'small', 'large']
 export const HORN_COUNTS: readonly HornCount[] = [0, 1, 2]
 export const EYE_COUNTS: readonly EyeCount[] = [0, 2, 4, 6]
 export const SEGMENT_COUNTS: readonly SegmentCount[] = [2, 3, 4, 5]
+export const PAIR_COUNTS: readonly PairCount[] = [1, 2, 3, 4]
 
 export interface CreatureSpec {
   body: { build: Build; frontLimb: FrontLimb; mesh: MeshMode; mutation: Mutation }
@@ -120,6 +122,12 @@ export interface CreatureSpec {
   spine: { arch: number; sway: number }
   torso: { height: number; width: number; depth: number; segments: SegmentCount }
   arms: { length: number; thickness: number }
+  /**
+   * How many pairs of limbs, and where along the body they sit. Spore lets you
+   * drop a limb anywhere; this is the same idea with the pairs spread evenly
+   * between the hindmost and foremost attachment.
+   */
+  limbs: { pairs: PairCount; back: number; front: number }
   legs: { type: LegType; length: number; thickness: number }
   tail: { type: TailType }
   back: { ridge: RidgeType }
@@ -142,6 +150,8 @@ export type SliderPath =
   | 'torso.depth'
   | 'arms.length'
   | 'arms.thickness'
+  | 'limbs.back'
+  | 'limbs.front'
   | 'legs.length'
   | 'legs.thickness'
 
@@ -167,6 +177,8 @@ export const SLIDERS: readonly SliderDef[] = [
   { path: 'torso.depth', label: 'Depth', group: 'Torso' },
   { path: 'arms.length', label: 'Length', group: 'Arms' },
   { path: 'arms.thickness', label: 'Thickness', group: 'Arms' },
+  { path: 'limbs.back', label: 'Hindmost at', group: 'Limbs' },
+  { path: 'limbs.front', label: 'Foremost at', group: 'Limbs' },
   { path: 'legs.length', label: 'Length', group: 'Legs' },
   { path: 'legs.thickness', label: 'Thickness', group: 'Legs' },
 ]
@@ -191,6 +203,7 @@ export function defaultSpec(): CreatureSpec {
     spine: { arch: 0.5, sway: 0.5 },
     torso: { height: 0.5, width: 0.5, depth: 0.45, segments: 3 },
     arms: { length: 0.5, thickness: 0.45 },
+    limbs: { pairs: 2, back: 0.04, front: 0.82 },
     legs: { type: 'digitigrade', length: 0.5, thickness: 0.5 },
     tail: { type: 'long' },
     back: { ridge: 'none' },
@@ -241,6 +254,7 @@ export function clampSpec(spec: CreatureSpec): CreatureSpec {
   out.head.eyes = oneOf(EYE_COUNTS, spec.head?.eyes, fallback.head.eyes)
   out.head.ears = oneOf(EAR_TYPES, spec.head?.ears, fallback.head.ears)
   out.torso.segments = oneOf(SEGMENT_COUNTS, spec.torso?.segments, fallback.torso.segments)
+  out.limbs.pairs = oneOf(PAIR_COUNTS, spec.limbs?.pairs, fallback.limbs.pairs)
   out.legs.type = oneOf(LEG_TYPES, spec.legs?.type, fallback.legs.type)
   out.tail.type = oneOf(TAIL_TYPES, spec.tail?.type, fallback.tail.type)
   out.back.ridge = oneOf(RIDGE_TYPES, spec.back?.ridge, fallback.back.ridge)
@@ -297,6 +311,7 @@ export function randomSpec(
     spine: { arch: biased(), sway: biased() },
     torso: { height: biased(), width: biased(), depth: biased(), segments: pick(SEGMENT_COUNTS) },
     arms: { length: biased(), thickness: biased() },
+    limbs: { pairs: pick(PAIR_COUNTS), back: random() * 0.3, front: 0.55 + random() * 0.45 },
     legs: { type: pick(LEG_TYPES), length: biased(), thickness: biased() },
     tail: { type: pick(TAIL_TYPES) },
     back: { ridge: pick(RIDGE_TYPES) },
