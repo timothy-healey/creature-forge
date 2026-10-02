@@ -31,16 +31,21 @@ export type TailJoint = (typeof TAIL_JOINTS)[number]
 
 export type JointName = CoreJoint | TailJoint
 
-/** The pose a joint rests in before any animation is added on top. */
+/**
+ * The pose a joint rests in before any animation is added on top.
+ *
+ * `y` is where the joint actually sits once built, so the animator can offset a
+ * joint's height without having to know how long a leg turned out to be.
+ */
 export interface RestPose {
   rx: number
   ry: number
   rz: number
-  py: number
+  y: number
 }
 
 export type RestMap = Partial<Record<string, RestPose>>
 
-export function rest(rx = 0, ry = 0, rz = 0, py = 0): RestPose {
-  return { rx, ry, rz, py }
+export function rest(rx = 0, ry = 0, rz = 0): RestPose {
+  return { rx, ry, rz, y: 0 }
 }

@@ -63,10 +63,9 @@ export function generate(input: CreatureSpec): Creature {
     group.name = name
     group.position.set(at.x, at.y, at.z)
     group.rotation.set(pose.rx, pose.ry, pose.rz)
-    group.position.y += pose.py
     parent.add(group)
     joints[name] = group
-    restMap[name] = pose
+    restMap[name] = { ...pose, y: group.position.y }
     return group
   }
 
