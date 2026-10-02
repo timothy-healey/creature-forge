@@ -2,6 +2,7 @@ import * as THREE from 'three'
 import { mirrorX, resolutionFor } from './geometry'
 import { type RestMap, type RestPose, rest } from './joints'
 import * as parts from './parts'
+import type { Limb } from './animate'
 import { DEFORMATIONS, deform, explode, skew, type DeformPart, type Deformation } from './mutate'
 import { buildSkin, type SkinPiece } from './skin'
 import { type CreatureSpec, clampSpec } from './spec'
@@ -25,6 +26,8 @@ import { type CreatureSpec, clampSpec } from './spec'
 export interface Creature {
   root: THREE.Group
   joints: Record<string, THREE.Object3D>
+  /** Every limb the gait can drive, however many bones each one turned out to have. */
+  limbs: Limb[]
   rest: RestMap
   material: THREE.Material
   triangleCount: number
@@ -54,11 +57,11 @@ const TAU = Math.PI * 2
  * names land opposite each other in the ring, which is what makes the walk read
  * as a wave rather than a twitch.
  */
-const RADIAL_NAMES: readonly (readonly [string, string, string])[] = [
-  ['backUpperL', 'backLowerL', 'backFootL'],
-  ['frontUpperL', 'frontLowerL', 'frontFootL'],
-  ['backUpperR', 'backLowerR', 'backFootR'],
-  ['frontUpperR', 'frontLowerR', 'frontFootR'],
+const RADIAL_NAMES: readonly (readonly [string, string])[] = [
+  ['back', 'L'],
+  ['front', 'L'],
+  ['back', 'R'],
+  ['front', 'R'],
 ]
 
 const lerp = (a: number, b: number, t: number) => a + (b - a) * t
@@ -135,6 +138,7 @@ export function generate(input: CreatureSpec): Creature {
   const bones: THREE.Bone[] = []
   const pieces: SkinPiece[] = []
   const deformable: DeformPart[] = []
+  const limbs: Limb[] = []
   // A welded skin shades smoothly; a stack of rigid parts is faceted on purpose.
   const material = new THREE.MeshLambertMaterial({ vertexColors: true, flatShading: !bound })
   // Bound limbs push up into their parent so the two surfaces weld instead of abutting.
@@ -254,6 +258,13 @@ export function generate(input: CreatureSpec): Creature {
     previous = node
   }
 
+  /** Each bone a little shorter than the one above it, summing to one. */
+  function shareOf(bones: number, index: number): number {
+    const weights = Array.from({ length: bones }, (_, i) => 1 - i * 0.12)
+    const total = weights.reduce((sum, weight) => sum + weight, 0)
+    return weights[index]! / total
+  }
+
   /**
    * How far below its socket a limb of a given length actually reaches.
    *
@@ -263,24 +274,22 @@ export function generate(input: CreatureSpec): Creature {
    * of the chain and measure it: every segment scales together, so one
    * measurement gives the ratio for any length.
    */
-  function dropPerLength(socket: THREE.Object3D, pose: RestPose, bend: readonly [number, number]): number {
-    const upper = new THREE.Object3D()
-    upper.rotation.set(pose.rx, pose.ry, pose.rz)
-    const lower = new THREE.Object3D()
-    lower.position.y = -0.52
-    lower.rotation.x = bend[0]
-    const foot = new THREE.Object3D()
-    foot.position.y = -0.48
-    foot.rotation.x = bend[1]
+  function dropPerLength(socket: THREE.Object3D, pose: RestPose, angles: readonly number[]): number {
+    const nodes = angles.map((angle, index) => {
+      const node = new THREE.Object3D()
+      node.rotation.x = angle
+      if (index === 0) node.rotation.set(pose.rx, pose.ry, pose.rz)
+      else node.position.y = -shareOf(angles.length - 1, index - 1)
+      return node
+    })
 
-    lower.add(foot)
-    upper.add(lower)
-    socket.add(upper)
+    for (let i = nodes.length - 1; i > 0; i--) nodes[i - 1]!.add(nodes[i]!)
+    socket.add(nodes[0]!)
     socket.updateMatrixWorld(true)
 
     const from = socket.getWorldPosition(new THREE.Vector3()).y
-    const to = foot.getWorldPosition(new THREE.Vector3()).y
-    socket.remove(upper)
+    const to = nodes[nodes.length - 1]!.getWorldPosition(new THREE.Vector3()).y
+    socket.remove(nodes[0]!)
 
     return Math.max(0.05, from - to)
   }
@@ -293,108 +302,117 @@ export function generate(input: CreatureSpec): Creature {
   }
 
   // ─── limbs ────────────────────────────────────────────────────────────────
-  const thighLen = legLen * 0.52
-  const shinLen = legLen * 0.4
 
-  /** One upper → lower → foot chain. Bilateral pairs and radial rings share it. */
+  /**
+   * One limb, of however many bones it is asked for.
+   *
+   * The names stay Upper / Lower / Foot at the ends whatever the count, with
+   * mids in between, so a chain of five still answers to the joints a gait
+   * expects to find. The limb also registers itself, which is how the gait
+   * drives it without knowing its shape.
+   */
   function limbChain(options: {
-    names: readonly [string, string, string]
+    group: string
+    /** Which of the pair, appended after the part name: backUpper + L. */
+    suffix: string
     parent: THREE.Object3D
     at: THREE.Vector3Like
     pose: RestPose
-    upperLen: number
-    lowerLen: number
+    length: number
+    bones: number
     thickness: number
     bend: readonly [number, number]
     ending: 'foot' | 'hand'
     footScale?: number
-    /** How many more times this limb sprouts smaller copies of itself. */
     branch?: number
-    /** Joints only, no geometry — this is how a limb is absent. */
     bare?: boolean
-    /** Which side of the body this is, so its profile twists to match. */
     handed?: number
+    phase?: number
   }): THREE.Object3D {
-    /**
-     * An odd-sided prism is symmetric about X but not about Z, so a five-sided
-     * limb is chiral however its twist is set. The left side is therefore built
-     * from the right side's geometry, reflected — the only way the two halves
-     * are truly mirror images, which is what makes `asymmetric` mean anything.
-     */
+    const bones = Math.max(2, Math.round(options.bones))
+    const part = (index: number) =>
+      index === 0
+        ? 'Upper'
+        : index === bones
+          ? 'Foot'
+          : index === bones - 1
+            ? 'Lower'
+            : `Mid${index}`
+    const names = Array.from({ length: bones + 1 }, (_, index) => `${options.group}${part(index)}${options.suffix}`)
+
     const sided = (geometry: THREE.BufferGeometry) =>
       (options.handed ?? 1) < 0 ? mirrorX(geometry) : geometry
 
-    const [upperName, lowerName, footName] = options.names
-    const upper = joint(upperName, options.parent, options.at, options.pose)
-    if (options.bare) {
-      const empty = joint(lowerName, upper, { x: 0, y: -options.upperLen, z: 0 }, rest(options.bend[0]))
-      joint(footName, empty, { x: 0, y: -options.lowerLen, z: 0 }, rest(options.bend[1]))
-      return upper
+    let node = joint(names[0]!, options.parent, options.at, options.pose)
+    const root = node
+
+    for (let bone = 0; bone < bones; bone++) {
+      const length = options.length * shareOf(bones, bone)
+      const taper = 1 - bone * 0.12
+
+      if (!options.bare) {
+        mesh(
+          `${names[bone]!}Mesh`,
+          node,
+          sided(
+            parts.limb(
+              forge,
+              length,
+              options.thickness * 0.58 * taper,
+              options.thickness * 0.64 * taper,
+              options.thickness * 0.44 * taper,
+            ),
+          ),
+        )
+      }
+
+      // Alternating, weaker down the chain, so a long limb folds like an
+      // insect's rather than bowing into a hoop.
+      const fold =
+        bone === bones - 1
+          ? options.bend[1]
+          : options.bend[0] * (bone % 2 === 0 ? 1 : -0.7) * (1 - bone * 0.15)
+      node = joint(names[bone + 1]!, node, { x: 0, y: -length, z: 0 }, rest(fold))
     }
-    mesh(
-      `${upperName}Mesh`,
-      upper,
-      sided(parts.limb(
-        forge,
-        options.upperLen,
-        options.thickness * 0.58,
-        options.thickness * 0.64,
-        options.thickness * 0.44,
-      )),
-    )
 
-    const lower = joint(lowerName, upper, { x: 0, y: -options.upperLen, z: 0 }, rest(options.bend[0]))
-    mesh(
-      `${lowerName}Mesh`,
-      lower,
-      sided(parts.limb(
-        forge,
-        options.lowerLen,
-        options.thickness * 0.46,
-        options.thickness * 0.5,
-        options.thickness * 0.34,
-      )),
-    )
+    if (!options.bare) {
+      if (options.ending === 'foot') {
+        const height = footHeight * (options.footScale ?? 1)
+        mesh(`${options.group}Foot${options.suffix}Mesh`, node, sided(parts.foot(forge, height)), {
+          x: 0,
+          y: -height * 0.5,
+          z: -dims.legThick * 0.45,
+        })
+      } else {
+        mesh(`${options.group}Foot${options.suffix}Mesh`, node, sided(parts.hand(forge, options.thickness)))
+      }
 
-    const end = joint(footName, lower, { x: 0, y: -options.lowerLen, z: 0 }, rest(options.bend[1]))
-    if (options.ending === 'foot') {
-      const height = footHeight * (options.footScale ?? 1)
-      mesh(`${footName}Mesh`, end, sided(parts.foot(forge, height)), {
-        x: 0,
-        y: -height * 0.5,
-        z: -dims.legThick * 0.45,
+      limbs.push({
+        joints: names,
+        kind: options.ending === 'hand' ? 'arm' : 'leg',
+        phase: options.phase ?? 0,
       })
-    } else {
-      mesh(`${footName}Mesh`, end, sided(parts.hand(forge, options.thickness)))
     }
 
-    // A limb that branches is a different body from one that is merely longer:
-    // the tree gets deeper rather than wider, and the same rule runs at every
-    // scale until it runs out.
     const remaining = options.branch ?? 0
-    if (remaining > 0) {
+    if (remaining > 0 && !options.bare) {
       for (const side of [-1, 1]) {
         limbChain({
-          names: [
-            `${upperName}B${side < 0 ? 0 : 1}Upper`,
-            `${upperName}B${side < 0 ? 0 : 1}Lower`,
-            `${upperName}B${side < 0 ? 0 : 1}Foot`,
-          ],
-          parent: end,
+          ...options,
+          group: `${options.group}${part(0)}${options.suffix}B${side < 0 ? 0 : 1}`,
+          suffix: '',
+          parent: node,
           at: { x: 0, y: -footHeight * 0.3, z: 0 },
           pose: rest(-0.35, 0, side * 0.72),
-          upperLen: options.upperLen * 0.52,
-          lowerLen: options.lowerLen * 0.52,
+          length: options.length * 0.52,
           thickness: options.thickness * 0.56,
-          bend: options.bend,
-          ending: options.ending,
           footScale: (options.footScale ?? 1) * 0.6,
           branch: remaining - 1,
         })
       }
     }
 
-    return upper
+    return root
   }
 
   if (radial) {
@@ -405,11 +423,7 @@ export function generate(input: CreatureSpec): Creature {
 
     for (let index = 0; index < count; index++) {
       const angle = (TAU * index) / count
-      const names = RADIAL_NAMES[index] ?? ([
-        `radialUpper${index}`,
-        `radialLower${index}`,
-        `radialFoot${index}`,
-      ] as const)
+      const [group, suffix] = RADIAL_NAMES[index] ?? (['radial', String(index)] as const)
 
       // A limb points straight down the Y axis, so turning it about Y does
       // nothing. The socket does the turning, and the limb then splays and
@@ -420,12 +434,13 @@ export function generate(input: CreatureSpec): Creature {
       hip.add(socket)
 
       limbChain({
-        names,
+        group,
+        suffix,
         parent: socket,
         at: { x: 0, y: 0, z: 0 },
         pose: rest(-0.34),
-        upperLen: thighLen,
-        lowerLen: shinLen,
+        length: legLen * 0.92,
+        bones: spec.limbs.segments,
         thickness: dims.legThick,
         bend: [0.62, -0.26],
         ending: 'foot',
@@ -433,6 +448,8 @@ export function generate(input: CreatureSpec): Creature {
         bare: legless,
         // A ring has no left or right, so the twist alternates around it.
         handed: index % 2 === 0 ? 1 : -1,
+        // A wave travelling round the ring rather than a pair stepping.
+        phase: (index / count) * TAU,
       })
     }
   } else if (segmented) {
@@ -447,13 +464,14 @@ export function generate(input: CreatureSpec): Creature {
       for (const side of [-1, 1]) {
         const suffix = side < 0 ? 'L' : 'R'
         limbChain({
-          names: [`${group}Upper${suffix}`, `${group}Lower${suffix}`, `${group}Foot${suffix}`],
+          group,
+          suffix,
           parent: bead,
           at: { x: side * dims.torsoW * 0.4 * shape.wide, y: beadLength * 0.4, z: 0 },
           // Counter-rotated against the pitch so a limb hangs down, not back.
           pose: rest(-pitch, 0, side * 0.12),
-          upperLen: span * 0.52,
-          lowerLen: span * 0.48,
+          length: span,
+          bones: spec.limbs.segments,
           thickness: dims.legThick * 0.8,
           bend: [0.3, -0.12],
           ending: 'foot',
@@ -461,6 +479,8 @@ export function generate(input: CreatureSpec): Creature {
           branch: branching,
           bare: legless,
           handed: side,
+          // A wave running down the body, each bead half a beat behind.
+          phase: (index % 2) * Math.PI + (side < 0 ? 0 : Math.PI),
         })
       }
     })
@@ -503,22 +523,31 @@ export function generate(input: CreatureSpec): Creature {
       const bend: readonly [number, number] = asArms
         ? [0.2, 0]
         : [digitigrade ? -1.0 : -0.08, digitigrade ? 0.48 : 0.04]
+      const bones = spec.limbs.segments
+      const angles = Array.from({ length: bones + 1 }, (_, bone) =>
+        bone === 0
+          ? 0
+          : bone === bones
+            ? bend[1]
+            : bend[0] * ((bone - 1) % 2 === 0 ? 1 : -0.7) * (1 - (bone - 1) * 0.15),
+      )
       // Length, not reach: scale it so the foot lands on the floor.
       const span = asArms
         ? armLen
-        : Math.max(0.08, (height - footHeight) / dropPerLength(socket, pose, bend))
+        : Math.max(0.08, (height - footHeight) / dropPerLength(socket, pose, angles))
       const thickness = asArms ? dims.armThick : dims.legThick * (foremost ? 0.92 : 1)
 
       for (const side of [-1, 1]) {
         const suffix = side < 0 ? 'L' : 'R'
         limbChain({
-          names: [`${group}Upper${suffix}`, `${group}Lower${suffix}`, `${group}Foot${suffix}`],
+          group,
+          suffix,
           parent: socket,
           at: { x: side * (asArms ? torsoW * 0.46 : dims.legThick * 1.05), y: 0, z: 0 },
           // Counter-rotated against the body's lean, so a limb hangs down.
           pose: rest(pose.rx, 0, side * (asArms ? 0.16 : 0.06)),
-          upperLen: span * 0.52,
-          lowerLen: span * 0.48,
+          length: span,
+          bones,
           thickness,
           bend,
           ending: asArms ? 'hand' : 'foot',
@@ -526,6 +555,7 @@ export function generate(input: CreatureSpec): Creature {
           branch: branching,
           bare: absent || !live,
           handed: side,
+          phase: (index % 2) * Math.PI + (side < 0 ? 0 : Math.PI),
         })
       }
     })
@@ -693,6 +723,7 @@ export function generate(input: CreatureSpec): Creature {
   return {
     root,
     joints,
+    limbs,
     rest: restMap,
     material,
     triangleCount,

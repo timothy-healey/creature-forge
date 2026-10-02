@@ -23,6 +23,29 @@ export const GAIT_PERIOD: Record<Gait, number> = {
 /** What the creature is standing on, which is all a gait needs to know about it. */
 export type Stance = CreatureSpec['body']
 
+/**
+ * One limb, as the gait sees it: a chain of joints from the body outward, what
+ * it is for, and where in the stride it is.
+ *
+ * This is the whole reason a gait can drive a creature nobody wrote it for. It
+ * never names a joint; it is handed chains and asks each one to reach, bend and
+ * push. A two-segment leg and a five-segment one take the same instruction, and
+ * so does a ring of six.
+ */
+export interface Limb {
+  joints: readonly string[]
+  kind: 'leg' | 'arm'
+  phase: number
+}
+
+/** The ordinary four-limbed arrangement, for callers that have nothing else. */
+export const DEFAULT_LIMBS: readonly Limb[] = [
+  { joints: ['backUpperL', 'backLowerL', 'backFootL'], kind: 'leg', phase: 0 },
+  { joints: ['backUpperR', 'backLowerR', 'backFootR'], kind: 'leg', phase: Math.PI },
+  { joints: ['frontUpperL', 'frontLowerL', 'frontFootL'], kind: 'arm', phase: Math.PI },
+  { joints: ['frontUpperR', 'frontLowerR', 'frontFootR'], kind: 'arm', phase: 0 },
+]
+
 /** An offset applied on top of a joint's rest pose. */
 export interface JointPose {
   rx?: number
@@ -36,28 +59,27 @@ export type Pose = Record<string, JointPose>
 
 const TAU = Math.PI * 2
 
-export function poseAt(time: number, gait: Gait, stance: Stance): Pose {
+export function poseAt(
+  time: number,
+  gait: Gait,
+  stance: Stance,
+  limbs: readonly Limb[] = DEFAULT_LIMBS,
+): Pose {
   const phase = (TAU * time) / GAIT_PERIOD[gait]
-  return gait === 'walk' ? walk(phase, stance) : idle(phase, stance)
+  return gait === 'walk' ? walk(phase, stance, limbs) : idle(phase, stance, limbs)
 }
 
 /** Standing: a slow breath, a drifting head, and a tail with nothing to do. */
-function idle(phase: number, stance: Stance): Pose {
+function idle(phase: number, stance: Stance, limbs: readonly Limb[]): Pose {
   const breath = Math.sin(phase)
   const drift = Math.sin(phase * 2)
   const planted = stance.frontLimb === 'forelegs'
-  const sway = planted ? 0.015 : 0.05
 
-  return {
+  const pose: Pose = {
     hip: { py: breath * (planted ? 0.006 : 0.011) },
     spine: { rx: breath * -0.02 },
     neck: { rx: breath * 0.025, ry: drift * 0.05 },
     head: { rx: breath * 0.03, ry: drift * 0.09 },
-
-    frontUpperL: { rx: breath * sway, rz: breath * 0.03 },
-    frontUpperR: { rx: breath * sway, rz: breath * -0.03 },
-    frontLowerL: { rx: breath * sway * 1.2 },
-    frontLowerR: { rx: breath * sway * 1.2 },
 
     earL: { rz: drift * 0.1, rx: breath * 0.07 },
     earR: { rz: drift * -0.1, rx: breath * 0.07 },
@@ -66,38 +88,37 @@ function idle(phase: number, stance: Stance): Pose {
 
     ...tailSwish(phase * 2, 0.1),
   }
+
+  for (const limb of limbs) {
+    if (roleOf(limb, stance) !== 'arm') continue
+    const sway = breath * 0.05
+    const [shoulder, ...rest] = limb.joints
+    if (shoulder) pose[shoulder] = { rx: sway, rz: sway * 0.6 }
+    for (const joint of rest) pose[joint] = { rx: sway * 1.2 }
+  }
+
+  return pose
 }
 
 /**
  * Walking. One stride per period.
  *
- * The limb phases are the same whether the creature walks on two legs or four —
- * each front limb runs half a cycle out of step with the hind limb on its own
- * side. On a biped that reads as an arm swinging against its leg; on a
- * quadruped the very same phasing is the diagonal pair, front-left moving with
- * back-right. Only the amplitudes differ, and whether the front limb bends like
- * a leg or swings like an arm.
+ * Each limb is told to reach, bend and push at its own point in the stride; it
+ * is not told which joints it has. On a biped that reads as an arm swinging
+ * against its leg; on a quadruped the same phasing is the diagonal pair; on a
+ * centipede it is a wave running down the body. The gait never finds out.
  */
-function walk(phase: number, stance: Stance): Pose {
-  const planted = stance.frontLimb === 'forelegs'
+function walk(phase: number, stance: Stance, limbs: readonly Limb[]): Pose {
   const swing = Math.sin(phase)
   // Twice per stride: the body dips each time a foot takes the weight.
   const dip = -0.018 * (1 - Math.cos(phase * 2)) * 0.5
   const level = stance.build === 'upright' ? 1 : 0.6
 
-  const back = { reach: 0.5, flex: 0.45, push: -0.4 }
-  const front = planted ? { reach: 0.44, flex: 0.38, push: -0.35 } : { reach: 0.42, flex: 0.16, push: 0 }
-
-  return {
+  const pose: Pose = {
     hip: { py: dip, ry: swing * -0.05 * level },
     spine: { ry: swing * 0.07 * level, rx: -0.04 * level },
     neck: { rx: dip * 1.5 },
     head: { ry: swing * -0.05, rx: 0.03 * level },
-
-    ...limbPose('backUpperL', 'backLowerL', 'backFootL', phase, back),
-    ...limbPose('backUpperR', 'backLowerR', 'backFootR', phase + Math.PI, back),
-    ...limbPose('frontUpperL', 'frontLowerL', 'frontFootL', phase + Math.PI, front),
-    ...limbPose('frontUpperR', 'frontLowerR', 'frontFootR', phase, front),
 
     earL: { rz: swing * 0.12, rx: -dip * 4 },
     earR: { rz: swing * -0.12, rx: -dip * 4 },
@@ -106,28 +127,54 @@ function walk(phase: number, stance: Stance): Pose {
 
     ...tailSwish(phase, 0.14),
   }
+
+  for (const limb of limbs) {
+    Object.assign(pose, stride(limb, roleOf(limb, stance), phase + limb.phase))
+  }
+
+  return pose
 }
 
 /**
- * One limb through a stride. Positive rx swings a tip backward, so a negative
- * upper angle is the limb reaching forward; the joint below it bends — always
- * one way, never hyperextending — so the foot clears the ground on the way
- * through instead of scraping it.
+ * One limb through a stride, whatever it is made of.
+ *
+ * The first joint reaches — positive rx swings a tip backward, so a negative
+ * angle is the limb reaching forward. Everything between bends, always one way
+ * so it never hyperextends, and alternating down the chain so a long limb
+ * folds like an insect's rather than bowing like a hoop. The last joint pushes.
  */
-function limbPose(
-  upper: string,
-  lower: string,
-  foot: string,
-  phase: number,
-  amount: { reach: number; flex: number; push: number },
-): Pose {
-  const flex = amount.flex * (1 - Math.cos(phase - Math.PI * 0.35)) * 0.5
+/**
+ * A front limb is an arm only while the creature is not standing on it. The
+ * stance has the last word, so a gait handed the default arrangement still
+ * walks a quadruped on four legs.
+ */
+function roleOf(limb: Limb, stance: Stance): Limb['kind'] {
+  return limb.kind === 'arm' && stance.frontLimb === 'forelegs' ? 'leg' : limb.kind
+}
 
-  return {
-    [upper]: { rx: Math.sin(phase) * amount.reach },
-    [lower]: { rx: flex },
-    [foot]: { rx: flex * amount.push },
-  }
+function stride(limb: Limb, kind: Limb['kind'], phase: number): Pose {
+  const arm = kind === 'arm'
+  const reach = arm ? 0.42 : 0.5
+  const flex = (arm ? 0.16 : 0.45) * (1 - Math.cos(phase - Math.PI * 0.35)) * 0.5
+
+  const pose: Pose = {}
+  const last = limb.joints.length - 1
+
+  limb.joints.forEach((joint, index) => {
+    if (index === 0) {
+      pose[joint] = { rx: Math.sin(phase) * reach }
+      return
+    }
+    if (index === last) {
+      pose[joint] = { rx: flex * (arm ? 0 : -0.4) }
+      return
+    }
+    // Alternating, and weaker the further down the limb.
+    const fold = index % 2 === 1 ? 1 : -0.7
+    pose[joint] = { rx: flex * fold * (1 - (index - 1) * 0.18) }
+  })
+
+  return pose
 }
 
 /** The tail lags behind itself, each segment a little later than the last. */

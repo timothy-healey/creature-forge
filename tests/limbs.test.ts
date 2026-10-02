@@ -1,6 +1,7 @@
 import { describe, expect, test } from 'vitest'
 import * as THREE from 'three'
 import { CORE_JOINTS } from '../src/joints'
+import { poseAt } from '../src/animate'
 import { generate } from '../src/generate'
 import { MESH_MODES, PAIR_COUNTS, defaultSpec, randomSpec, type CreatureSpec } from '../src/spec'
 
@@ -84,7 +85,7 @@ describe('where a pair sits', () => {
       for (const front of [0.4, 0.75, 1]) {
         for (const pairs of PAIR_COUNTS) {
           const spec = walker((s) => {
-            s.limbs = { pairs, back, front }
+            s.limbs = { ...s.limbs, pairs, back, front }
           })
           const creature = generate(spec)
           creature.root.updateMatrixWorld(true)
@@ -151,5 +152,87 @@ describe('bilateral symmetry', () => {
         expect(left.getSize(new THREE.Vector3()).distanceTo(span('backUpperR').getSize(new THREE.Vector3()))).toBeLessThan(1e-9)
       }
     }
+  })
+})
+
+describe('how many bones a limb has', () => {
+  const boned = (segments: number): CreatureSpec =>
+    walker((spec) => void (spec.limbs.segments = segments as CreatureSpec['limbs']['segments']))
+
+  test.each([2, 3, 4, 5])('%i bones makes a chain of that many joints plus a foot', (segments) => {
+    const creature = generate(boned(segments))
+
+    expect(creature.limbs[0]!.joints).toHaveLength(segments + 1)
+  })
+
+  test.each([2, 3, 4, 5])('%i bones still starts Upper and ends Foot, whatever is between', (segments) => {
+    const joints = generate(boned(segments)).limbs[0]!.joints
+
+    expect(joints[0]).toBe('backUpperL')
+    expect(joints[joints.length - 1]).toBe('backFootL')
+    expect(joints).toContain('backLowerL')
+  })
+
+  test.each([2, 3, 4, 5])('a %i-boned limb still plants its foot on the floor', (segments) => {
+    const heights = feetOn(boned(segments))
+
+    expect(Math.max(...heights) - Math.min(...heights)).toBeLessThan(0.05)
+  })
+
+  test('longer limbs cost more', () => {
+    const counts = [2, 3, 4, 5].map((segments) => generate(boned(segments)).triangleCount)
+
+    for (let i = 1; i < counts.length; i++) expect(counts[i]!).toBeGreaterThan(counts[i - 1]!)
+  })
+})
+
+describe('the gait, handed a creature nobody wrote it for', () => {
+  const boned = (segments: number): CreatureSpec =>
+    walker((spec) => void (spec.limbs.segments = segments as CreatureSpec['limbs']['segments']))
+
+  const drives = (spec: CreatureSpec): [number, number] => {
+    const creature = generate(spec)
+    const pose = poseAt(0.3, 'walk', spec.body, creature.limbs)
+    const joints = creature.limbs.flatMap((limb) => limb.joints)
+    return [joints.filter((joint) => pose[joint]).length, joints.length]
+  }
+
+  test.each([2, 3, 4, 5])('drives every joint of a %i-boned limb', (segments) => {
+    const [driven, total] = drives(boned(segments))
+
+    expect(total).toBeGreaterThan(0)
+    expect(driven).toBe(total)
+  })
+
+  test.each([
+    ['a radial ring', (spec: CreatureSpec) => void (spec.body.mutation = 'radial')],
+    ['a segmented crawler', (spec: CreatureSpec) => void (spec.body.mutation = 'segmented')],
+    ['four pairs', (spec: CreatureSpec) => void (spec.limbs.pairs = 4)],
+    ['one pair of five-boned legs', (spec: CreatureSpec) => {
+      spec.limbs.pairs = 1
+      spec.limbs.segments = 5
+    }],
+  ])('drives every limb of %s', (_name, edit) => {
+    const [driven, total] = drives(walker(edit))
+
+    expect(total).toBeGreaterThan(0)
+    expect(driven).toBe(total)
+  })
+
+  test('registers no limb for a part that was left off', () => {
+    const spec = walker((s) => {
+      s.legs.type = 'none'
+      s.body.frontLimb = 'none'
+    })
+
+    expect(generate(spec).limbs).toHaveLength(0)
+  })
+
+  test('phases the two sides of a pair against each other', () => {
+    const limbs = generate(walker()).limbs
+    const left = limbs.find((limb) => limb.joints[0] === 'backUpperL')!
+    const right = limbs.find((limb) => limb.joints[0] === 'backUpperR')!
+
+    expect(Math.abs(left.phase - right.phase)).toBeCloseTo(Math.PI, 5)
   })
 })

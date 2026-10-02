@@ -84,8 +84,9 @@ describe('poseAt', () => {
 
   test('walk moves a quadruped in diagonal pairs, front-left with back-right', () => {
     for (const t of sweep('walk')) {
+      // Standing on all four, a front limb is a leg and swings like one.
       expect(rx('walk', t, 'frontUpperL', QUADRUPED), `t=${t}`).toBeCloseTo(
-        rx('walk', t, 'backUpperR', QUADRUPED) * (0.44 / 0.5),
+        rx('walk', t, 'backUpperR', QUADRUPED),
         5,
       )
     }

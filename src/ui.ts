@@ -11,6 +11,7 @@ import {
   HORN_COUNTS,
   LEG_TYPES,
   MESH_MODES,
+  LIMB_SEGMENTS,
   PAIR_COUNTS,
   MUTATION_GROUPS,
   RIDGE_TYPES,
@@ -183,6 +184,10 @@ function mountBody(panel: HTMLElement, spec: CreatureSpec, changed: () => void):
     section('Limbs', [
       choice('Pairs', PAIR_COUNTS, spec.limbs.pairs, (pairs) => {
         spec.limbs.pairs = pairs
+        changed()
+      }),
+      choice('Bones', LIMB_SEGMENTS, spec.limbs.segments, (segments) => {
+        spec.limbs.segments = segments
         changed()
       }),
       ...slidersFor('Limbs', spec, changed),

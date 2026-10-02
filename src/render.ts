@@ -169,7 +169,11 @@ export function createViewport(canvas: HTMLCanvasElement): Viewport {
     controls.update()
 
     if (creature) {
-      applyPose(creature.joints, creature.rest, poseAt(clock.getElapsedTime(), gait, stance))
+      applyPose(
+        creature.joints,
+        creature.rest,
+        poseAt(clock.getElapsedTime(), gait, stance, creature.limbs),
+      )
     }
     renderer.render(scene, camera)
   }
