@@ -112,6 +112,10 @@ export function generate(input: CreatureSpec): Creature {
   const digitigrade = spec.legs.type === 'digitigrade'
 
   const bound = spec.body.mesh === 'skinned'
+  // A strut creature has no surface: the armature is the whole of it, so the
+  // body parts are built for their transforms and never given geometry.
+  const strut = spec.body.mutation === 'strut'
+  let armature = false
 
   const root = new THREE.Group()
   root.name = 'creature'
@@ -138,6 +142,16 @@ export function generate(input: CreatureSpec): Creature {
     return node
   }
 
+  /** The joint a node hangs from, skipping any plain nodes in between. */
+  function parentJoint(node: THREE.Object3D): THREE.Object3D | null {
+    let current = node.parent
+    while (current) {
+      if (current.name && joints[current.name] === current) return current
+      current = current.parent
+    }
+    return null
+  }
+
   /** The bone a part belongs to: the nearest one at or above where it hangs. */
   function ownerOf(node: THREE.Object3D): THREE.Bone {
     let current: THREE.Object3D | null = node
@@ -153,6 +167,10 @@ export function generate(input: CreatureSpec): Creature {
     if (placed.position) holder.position.set(placed.position.x, placed.position.y, placed.position.z)
     if (placed.rotation) holder.rotation.set(placed.rotation.x, placed.rotation.y, placed.rotation.z)
     parent.add(holder)
+    if (strut && !armature) {
+      placed.geometry.dispose()
+      return holder
+    }
     geometries.push(placed.geometry)
     deformable.push({ geometry: placed.geometry, node: holder })
 
@@ -320,7 +338,11 @@ export function generate(input: CreatureSpec): Creature {
     root.updateMatrixWorld(true)
     const standing = new THREE.Box3()
     for (const suffix of ['L', 'R']) standing.expandByObject(joints[`backFoot${suffix}`]!)
-    const ground = Number.isFinite(standing.min.y) ? standing.min.y : 0
+    // With no geometry to measure — a strut creature has none yet — the ankle
+    // joint itself is where the floor is.
+    const ground = Number.isFinite(standing.min.y)
+      ? standing.min.y
+      : Math.min(...['L', 'R'].map((s) => joints[`backFoot${s}`]!.getWorldPosition(new THREE.Vector3()).y))
     const shoulderHeight = probes[0]!.getWorldPosition(new THREE.Vector3()).y
 
     // A foreleg is as long as the gap between its shoulder and the floor.
@@ -431,6 +453,35 @@ export function generate(input: CreatureSpec): Creature {
 
     tailParent = node
     tailAt = { x: 0, y: 0, z: -segmentLength }
+  }
+
+  // ─── the armature, when that is all there is ──────────────────────────────
+  if (strut) {
+    armature = true
+    root.updateMatrixWorld(true)
+    const up = new THREE.Vector3(0, 1, 0)
+    const bar = dims.legThick * 0.34
+    const here = new THREE.Vector3()
+    const there = new THREE.Vector3()
+
+    for (const [name, node] of Object.entries(joints)) {
+      const above = parentJoint(node)
+      if (above) {
+        node.getWorldPosition(here)
+        above.worldToLocal(here)
+        const reach = here.length()
+        if (reach > 1e-4) {
+          const holder = attach(above, { name: `strut_${name}`, geometry: parts.strut(forge, reach, bar) })
+          holder.quaternion.setFromUnitVectors(up, there.copy(here).normalize())
+        }
+      }
+
+      const radius = name === 'head' ? dims.headW * 0.42 : name === 'hip' ? bar * 2.4 : bar * 1.7
+      attach(node, {
+        name: `knuckle_${name}`,
+        geometry: parts.knuckle(forge, radius, name.includes('Foot')),
+      })
+    }
   }
 
   // ─── deform, before anything is welded, so it composes with both modes ───

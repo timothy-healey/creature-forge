@@ -653,3 +653,35 @@ function horizontal(geometry: THREE.BufferGeometry): THREE.BufferGeometry {
   geometry.rotateX(-Math.PI / 2)
   return geometry
 }
+
+// ─── armature ───────────────────────────────────────────────────────────────
+
+/** A strut running from one joint to the next. Built along +Y, swung into place. */
+export function strut({ palette, res, shape }: Forge, length: number, thickness: number): THREE.BufferGeometry {
+  return prism({
+    sides: res.sides(4),
+    sections: sample(
+      { rx: (t) => thickness * (1 - 0.25 * Math.sin(Math.PI * t)), rz: (t) => thickness * (1 - 0.25 * Math.sin(Math.PI * t)) },
+      length,
+      res.bands(1),
+    ),
+    shape: section(shape, 1),
+    colors: { side: palette.body, cap: palette.body },
+  })
+}
+
+/** The knuckle at a joint, centred on it. */
+export function knuckle({ palette, res, shape }: Forge, radius: number, accent = false): THREE.BufferGeometry {
+  const geometry = prism({
+    sides: res.sides(5),
+    sections: sample(
+      { rx: (t) => radius * (0.35 + 0.95 * Math.sin(Math.PI * t)), rz: (t) => radius * (0.35 + 0.95 * Math.sin(Math.PI * t)) },
+      radius * 2,
+      res.bands(2),
+    ),
+    shape: section(shape, 1),
+    colors: { side: accent ? palette.accent : palette.belly, cap: accent ? palette.accent : palette.belly },
+  })
+  geometry.translate(0, -radius, 0)
+  return geometry
+}

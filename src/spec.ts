@@ -24,7 +24,7 @@ export type MeshMode = 'jointed' | 'skinned'
  * its symmetry, its topology, what its surface even is — rather than bolting
  * another part onto the same plan.
  */
-export type Mutation = 'none' | 'radial' | 'shattered' | 'melted'
+export type Mutation = 'none' | 'radial' | 'shattered' | 'melted' | 'strut'
 export type FrontLimb = 'arms' | 'forelegs'
 export type HeadType = 'snout' | 'beak' | 'blunt' | 'crest'
 export type LegType = 'digitigrade' | 'plantigrade'
@@ -37,7 +37,7 @@ export type SegmentCount = 2 | 3 | 4 | 5
 
 export const BUILDS: readonly Build[] = ['upright', 'hunched', 'quadruped']
 export const MESH_MODES: readonly MeshMode[] = ['jointed', 'skinned']
-export const MUTATIONS: readonly Mutation[] = ['none', 'radial', 'shattered', 'melted']
+export const MUTATIONS: readonly Mutation[] = ['none', 'radial', 'shattered', 'melted', 'strut']
 export const FRONT_LIMBS: readonly FrontLimb[] = ['arms', 'forelegs']
 export const HEAD_TYPES: readonly HeadType[] = ['snout', 'beak', 'blunt', 'crest']
 export const LEG_TYPES: readonly LegType[] = ['digitigrade', 'plantigrade']

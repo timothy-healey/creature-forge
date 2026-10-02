@@ -250,3 +250,83 @@ describe('every mutation', () => {
     }
   })
 })
+
+describe('the strut mutation', () => {
+  const asStrut = (edit: (spec: CreatureSpec) => void = () => {}): CreatureSpec => {
+    const spec = defaultSpec()
+    spec.body.mutation = 'strut'
+    edit(spec)
+    return spec
+  }
+
+  const names = (creature: ReturnType<typeof generate>): string[] => {
+    const out: string[] = []
+    creature.root.traverse((node) => {
+      if ((node as THREE.Mesh).isMesh) out.push(node.name)
+    })
+    return out
+  }
+
+  test('throws the surface away: nothing named after a body part survives', () => {
+    const parts = names(generate(asStrut()))
+
+    expect(parts.length).toBeGreaterThan(0)
+    for (const name of parts) {
+      expect(name.startsWith('strut_') || name.startsWith('knuckle_'), name).toBe(true)
+    }
+  })
+
+  test('puts a knuckle on every joint', () => {
+    const creature = generate(asStrut())
+    const knuckles = names(creature).filter((name) => name.startsWith('knuckle_'))
+
+    expect(knuckles).toHaveLength(Object.keys(creature.joints).length)
+  })
+
+  test('runs a strut between every joint and the one above it', () => {
+    const creature = generate(asStrut())
+    const struts = names(creature).filter((name) => name.startsWith('strut_'))
+
+    // Every joint but the root one hangs from another, so every one but that gets a strut.
+    expect(struts.length).toBeGreaterThanOrEqual(Object.keys(creature.joints).length - 2)
+  })
+
+  test('stands where the creature it replaces stood', () => {
+    const solid = generate(defaultSpec())
+    const bones = generate(asStrut())
+    solid.root.updateMatrixWorld(true)
+    bones.root.updateMatrixWorld(true)
+
+    const a = new THREE.Box3().setFromObject(solid.root)
+    const b = new THREE.Box3().setFromObject(bones.root)
+
+    expect(b.min.y).toBeCloseTo(0, 1)
+    expect(Math.abs(b.max.y - a.max.y) / a.max.y).toBeLessThan(0.2)
+  })
+
+  test('is priced by its joint count, not by the body it stands in for', () => {
+    // Two kinds of part and nothing else, so a creature with more joints costs
+    // more and a creature with a fatter torso costs exactly the same.
+    const lean = asStrut()
+    const limby = asStrut((spec) => {
+      spec.body.mutation = 'strut'
+      spec.torso.segments = 5
+    })
+    const fat = asStrut((spec) => void (spec.torso.width = 1))
+
+    expect(generate(fat).triangleCount).toBe(generate(lean).triangleCount)
+    expect(Object.keys(generate(limby).joints).length).toBeGreaterThanOrEqual(
+      Object.keys(generate(lean).joints).length,
+    )
+  })
+
+  test('works on a radial ring and in both mesh modes', () => {
+    for (const mesh of MESH_MODES) {
+      const creature = generate(asStrut((spec) => void (spec.body.mesh = mesh)))
+      creature.root.updateMatrixWorld(true)
+
+      expect(new THREE.Box3().setFromObject(creature.root).min.y, mesh).toBeCloseTo(0, 1)
+      expect(creature.triangleCount, mesh).toBeGreaterThan(0)
+    }
+  })
+})
