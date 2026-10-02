@@ -330,3 +330,77 @@ describe('the strut mutation', () => {
     }
   })
 })
+
+describe('the segmented mutation', () => {
+  const chained = (edit: (spec: CreatureSpec) => void = () => {}): CreatureSpec => {
+    const spec = defaultSpec()
+    spec.body.mutation = 'segmented'
+    edit(spec)
+    return spec
+  }
+
+  const bodyJoints = (creature: ReturnType<typeof generate>) =>
+    Object.keys(creature.joints).filter((name) => /^body\d+$/.test(name))
+
+  test('cuts the torso into a chain of joints instead of one rigid block', () => {
+    expect(bodyJoints(generate(chained())).length).toBeGreaterThan(3)
+    expect(bodyJoints(generate(defaultSpec()))).toHaveLength(0)
+  })
+
+  test('takes the chain’s length from the body’s segment count', () => {
+    const lengths = SEGMENT_COUNTS.map(
+      (segments) => bodyJoints(generate(chained((spec) => void (spec.torso.segments = segments)))).length,
+    )
+
+    for (let i = 1; i < lengths.length; i++) expect(lengths[i]!).toBeGreaterThan(lengths[i - 1]!)
+  })
+
+  test('hangs a pair of limbs from every unit of the chain', () => {
+    const creature = generate(chained())
+    const feet = Object.keys(creature.joints).filter((name) => name.includes('Foot'))
+
+    expect(feet).toHaveLength(bodyJoints(creature).length * 2)
+  })
+
+  test('stands every one of those limbs on the same floor', () => {
+    const creature = generate(chained())
+    creature.root.updateMatrixWorld(true)
+
+    const heights = Object.keys(creature.joints)
+      .filter((name) => name.includes('Foot'))
+      .map((name) => new THREE.Box3().expandByObject(creature.joints[name]!).min.y)
+
+    expect(Math.max(...heights) - Math.min(...heights)).toBeLessThan(0.05)
+  })
+
+  test('lies long and low rather than standing up', () => {
+    const upright = generate(defaultSpec())
+    const crawler = generate(chained())
+    upright.root.updateMatrixWorld(true)
+    crawler.root.updateMatrixWorld(true)
+
+    const a = new THREE.Box3().setFromObject(upright.root).getSize(new THREE.Vector3())
+    const b = new THREE.Box3().setFromObject(crawler.root).getSize(new THREE.Vector3())
+
+    expect(b.z / b.y).toBeGreaterThan(a.z / a.y)
+  })
+
+  test('still carries its head at the far end of the chain', () => {
+    const creature = generate(chained())
+    creature.root.updateMatrixWorld(true)
+
+    const head = creature.joints.head!.getWorldPosition(new THREE.Vector3())
+    const first = creature.joints.body0!.getWorldPosition(new THREE.Vector3())
+
+    expect(head.z).toBeGreaterThan(first.z)
+  })
+
+  test('builds in both mesh modes and lands on the ground', () => {
+    for (const mesh of MESH_MODES) {
+      const creature = generate(chained((spec) => void (spec.body.mesh = mesh)))
+      creature.root.updateMatrixWorld(true)
+
+      expect(new THREE.Box3().setFromObject(creature.root).min.y, mesh).toBeCloseTo(0, 1)
+    }
+  })
+})

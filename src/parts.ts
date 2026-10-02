@@ -106,6 +106,36 @@ export function torsoProfile({ dims, shape }: Forge, segments: number): Profile 
   }
 }
 
+/**
+ * One bead of a segmented body: a slice of the torso profile pinched to a waist
+ * at both ends, so the chain reads as discrete units rather than a single tube.
+ */
+export function segment(forge: Forge, segments: number, index: number, count: number, length: number): Placed {
+  const { palette, res, shape } = forge
+  const whole = torsoProfile(forge, segments)
+  const pinch = (t: number) => 0.74 + 0.4 * Math.sin(Math.PI * t)
+  const along = (t: number) => (index + t) / count
+
+  return {
+    name: `segment${index}`,
+    geometry: prism({
+      sides: res.sides(6),
+      sections: sample(
+        {
+          rx: (t) => whole.rx(along(t)) * pinch(t),
+          rz: (t) => whole.rz(along(t)) * pinch(t),
+          yaw: (t) => t * 0.2,
+        },
+        length,
+        res.bands(2),
+      ),
+      shape: section(shape, 0.88 + shape.bulk * 0.62),
+      colors: { side: palette.body, belly: palette.belly, cap: palette.belly },
+      bellyWidth: 0.95,
+    }),
+  }
+}
+
 export function torso(forge: Forge, segments: number): Placed {
   const { palette, res, shape } = forge
 

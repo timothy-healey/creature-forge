@@ -68,8 +68,9 @@ export function generate(input: CreatureSpec): Creature {
   const spec = clampSpec(input)
   const res = resolutionFor(spec.detail.level, spec.shape.edge)
   const radial = spec.body.mutation === 'radial'
-  // A ring of limbs has no front, so there is nothing for a pitch to lean into.
-  const pitch = radial ? 0 : PITCH[spec.body.build]
+  const segmented = spec.body.mutation === 'segmented'
+  // A ring of limbs has no front to lean into; a chain of them only works flat.
+  const pitch = radial ? 0 : segmented ? 1.36 : PITCH[spec.body.build]
   const planted = spec.body.frontLimb === 'forelegs'
 
   const palette: parts.Palette = {
@@ -209,7 +210,29 @@ export function generate(input: CreatureSpec): Creature {
   const hip = joint('hip', root, { x: 0, y: legLen, z: 0 }, rest())
   const spine = joint('spine', hip, { x: 0, y: 0, z: 0 }, rest(pitch))
 
-  attach(spine, parts.torso(forge, spec.torso.segments))
+  const beadCount = spec.torso.segments + 2
+  const beadLength = dims.spineLength / beadCount
+  const chain: THREE.Object3D[] = []
+
+  if (segmented) {
+    // One torso gives way to a chain of body units, each a joint of its own and
+    // each carrying its own pair of limbs. The topology is different, not the
+    // part list: nothing has been added, the body has been cut up.
+    let previous: THREE.Object3D = spine
+    for (let index = 0; index < beadCount; index++) {
+      const node = joint(
+        `body${index}`,
+        previous,
+        { x: 0, y: index === 0 ? 0 : beadLength, z: 0 },
+        rest(0, (index % 2 === 0 ? 1 : -1) * 0.1),
+      )
+      attach(node, parts.segment(forge, spec.torso.segments, index, beadCount, beadLength))
+      chain.push(node)
+      previous = node
+    }
+  } else {
+    attach(spine, parts.torso(forge, spec.torso.segments))
+  }
 
   // ─── limbs ────────────────────────────────────────────────────────────────
   const thighLen = legLen * 0.52
@@ -304,6 +327,32 @@ export function generate(input: CreatureSpec): Creature {
         ending: 'foot',
       })
     }
+  } else if (segmented) {
+    root.updateMatrixWorld(true)
+    const perch = new THREE.Vector3()
+
+    chain.forEach((bead, index) => {
+      const group = index === 0 ? 'back' : index === 1 ? 'front' : `seg${index}`
+      const height = bead.getWorldPosition(perch).y
+      const span = Math.max(0.08, height - footHeight)
+
+      for (const side of [-1, 1]) {
+        const suffix = side < 0 ? 'L' : 'R'
+        limbChain({
+          names: [`${group}Upper${suffix}`, `${group}Lower${suffix}`, `${group}Foot${suffix}`],
+          parent: bead,
+          at: { x: side * dims.torsoW * 0.4 * shape.wide, y: beadLength * 0.4, z: 0 },
+          // Counter-rotated against the pitch so a limb hangs down, not back.
+          pose: rest(-pitch, 0, side * 0.12),
+          upperLen: span * 0.52,
+          lowerLen: span * 0.48,
+          thickness: dims.legThick * 0.8,
+          bend: [0.3, -0.12],
+          ending: 'foot',
+          footScale: 0.8,
+        })
+      }
+    })
   } else {
     for (const side of [-1, 1]) {
       const suffix = side < 0 ? 'L' : 'R'
@@ -322,7 +371,7 @@ export function generate(input: CreatureSpec): Creature {
   }
 
   // ─── front limbs, sized against the floor the hind feet stand on ──────────
-  if (!radial) {
+  if (!radial && !segmented) {
     const shoulderPoses = [-1, 1].map((side) =>
       planted ? rest(-pitch, 0, side * 0.06) : rest(-0.08 - pitch * 0.3, 0, side * 0.16),
     )
@@ -369,7 +418,9 @@ export function generate(input: CreatureSpec): Creature {
   }
 
   // ─── neck and head, counter-rotated against the pitch ─────────────────────
-  const neck = joint('neck', spine, { x: 0, y: dims.spineLength, z: 0 }, rest(-pitch * 0.5))
+  const neckParent = segmented ? chain[chain.length - 1]! : spine
+  const neckAt = { x: 0, y: segmented ? beadLength : dims.spineLength, z: 0 }
+  const neck = joint('neck', neckParent, neckAt, rest(-pitch * 0.5))
   attach(neck, parts.neck(forge))
 
   const head = joint('head', neck, { x: 0, y: dims.neckLen, z: 0 }, rest(-pitch * 0.45))
