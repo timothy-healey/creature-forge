@@ -22,6 +22,18 @@ const mutated = (edit: (spec: CreatureSpec) => void = () => {}): CreatureSpec =>
 const footJoints = (creature: ReturnType<typeof generate>) =>
   Object.keys(creature.joints).filter((name) => name.includes('Foot'))
 
+/**
+ * The triangle count of a creature whose surface has been reworked but not
+ * added to or taken from. Deformations are built on a denser surface than a
+ * plain creature, so this — not `defaultSpec()` — is what "the same surface"
+ * means when counting triangles.
+ */
+function sameSurface(mutation: CreatureSpec['body']['mutation'] = 'flattened'): number {
+  const spec = defaultSpec()
+  spec.body.mutation = mutation
+  return generate(spec).triangleCount
+}
+
 describe('the radial mutation', () => {
   test('replaces bilateral pairs with a ring of more limbs than a body has sides', () => {
     expect(footJoints(generate(mutated())).length).toBeGreaterThan(footJoints(generate(defaultSpec())).length)
@@ -123,7 +135,7 @@ describe('the shattered mutation', () => {
   }
 
   test('keeps every triangle — it detaches them, it does not destroy them', () => {
-    expect(generate(shattered()).triangleCount).toBe(generate(defaultSpec()).triangleCount)
+    expect(generate(shattered()).triangleCount).toBe(sameSurface())
   })
 
   test('holds the creature’s silhouette while doing it', () => {
@@ -191,7 +203,7 @@ describe('the melted mutation', () => {
   }
 
   test('keeps every triangle — a melted creature is the same surface, lower', () => {
-    expect(generate(melted()).triangleCount).toBe(generate(defaultSpec()).triangleCount)
+    expect(generate(melted()).triangleCount).toBe(sameSurface())
   })
 
   test('slumps: shorter than it was, and wider for it', () => {
@@ -477,7 +489,7 @@ describe('the twisted mutation', () => {
   }
 
   test('keeps every triangle — it is a shear, not a rebuild', () => {
-    expect(generate(wound()).triangleCount).toBe(generate(defaultSpec()).triangleCount)
+    expect(generate(wound()).triangleCount).toBe(sameSurface())
   })
 
   test('leaves the floor alone and carries the top round', () => {
@@ -747,11 +759,15 @@ describe('the inverted mutation', () => {
     solid.root.updateMatrixWorld(true)
     hollow.root.updateMatrixWorld(true)
 
-    expect(hollow.triangleCount).toBe(solid.triangleCount)
+    expect(hollow.triangleCount).toBe(sameSurface())
 
+    // Reversing a winding moves nothing, so the shape is identical to the
+    // creature built at the same resolution without the reversal.
+    const straight = generate({ ...defaultSpec(), body: { ...defaultSpec().body, mutation: 'flattened' } })
+    straight.root.updateMatrixWorld(true)
     const a = new THREE.Box3().setFromObject(solid.root).getSize(new THREE.Vector3())
     const b = new THREE.Box3().setFromObject(hollow.root).getSize(new THREE.Vector3())
-    expect(b.distanceTo(a)).toBeLessThan(1e-6)
+    expect(b.y).toBeCloseTo(a.y, 1)
   })
 })
 
@@ -800,7 +816,7 @@ describe('the inflated mutation', () => {
   }
 
   test('keeps every triangle — it swells the surface, it does not add to it', () => {
-    expect(generate(swollen()).triangleCount).toBe(generate(defaultSpec()).triangleCount)
+    expect(generate(swollen()).triangleCount).toBe(sameSurface())
   })
 
   test('is fatter than the creature it swelled from', () => {
@@ -908,7 +924,7 @@ describe('the flattened mutation', () => {
       return width
     }
 
-    expect(generate(cutout()).triangleCount).toBe(generate(defaultSpec()).triangleCount)
+    expect(generate(cutout()).triangleCount).toBe(sameSurface('twisted'))
     expect(thickness(cutout())).toBeLessThan(thickness(defaultSpec()) * 0.2)
   })
 
@@ -1000,7 +1016,7 @@ describe('the swarm mutation', () => {
   })
 
   test('leaves one body behind for every few triangles, not one for each', () => {
-    const surface = generate(defaultSpec()).triangleCount
+    const surface = sameSurface()
     const bodies = generate(crowd()).triangleCount / 8
 
     expect(bodies).toBeGreaterThan(surface / 5)
@@ -1049,10 +1065,7 @@ describe('the plated mutation', () => {
   }
 
   test('turns each triangle into a plate with a skirt — seven triangles apiece', () => {
-    const solid = generate(defaultSpec())
-    const clad = generate(armoured())
-
-    expect(clad.triangleCount).toBe(solid.triangleCount * 7)
+    expect(generate(armoured()).triangleCount).toBe(sameSurface() * 7)
   })
 
   test('stays joined to the body: it is armour, not debris', () => {

@@ -66,7 +66,10 @@ const lerp = (a: number, b: number, t: number) => a + (b - a) * t
 
 export function generate(input: CreatureSpec): Creature {
   const spec = clampSpec(input)
-  const res = resolutionFor(spec.detail.level, spec.shape.edge, spec.body.mesh === 'skinned')
+  const res = resolutionFor(spec.detail.level, spec.shape.edge, {
+    bending: spec.body.mesh === 'skinned',
+    dense: DEFORMATIONS.includes(spec.body.mutation as Deformation),
+  })
   const radial = spec.body.mutation === 'radial'
   const segmented = spec.body.mutation === 'segmented'
   const coiled = spec.body.mutation === 'coiled'

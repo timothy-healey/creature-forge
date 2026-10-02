@@ -1,5 +1,6 @@
 import * as THREE from 'three'
 import {
+  crossSectionRing,
   fan,
   hangDown,
   pointBackward,
@@ -171,13 +172,43 @@ export function neck({ dims, palette, res, shape }: Forge): Placed {
 
 // ─── head ───────────────────────────────────────────────────────────────────
 
-export function skull({ dims, palette, res, shape }: Forge): Placed {
+export function skullProfile({ dims, shape }: Forge): Profile {
   const peak = 0.3 + shape.bulk * 0.35
-  const profile: Profile = {
+  return {
     rx: (t) => dims.headW * 0.5 * shape.wide * (0.62 + 0.42 * hump(t, peak)),
     rz: (t) => dims.headD * 0.5 * shape.deep * (0.62 + 0.42 * hump(t, peak)),
     dz: (t) => dims.headD * 0.08 * Math.sin(Math.PI * t) - dims.headD * 0.04 * t,
   }
+}
+
+/**
+ * A point on the skull's front, out toward the side by `outward`.
+ *
+ * Taken from the actual cross-section the skull is built from, not from the
+ * smooth curve behind it. At a low side count — which is exactly what a sharp
+ * `edge` produces — the skull's front is a flat face, and solving the ideal
+ * superellipse put the eyes a long way inside it.
+ */
+export function skullFront(forge: Forge, t: number, outward: number): { x: number; z: number } {
+  const profile = skullProfile(forge)
+  const bias = 0.95 + forge.shape.bulk * 0.45
+  const ring = crossSectionRing(forge.res.sides(6), section(forge.shape, bias))
+
+  const facing = ring.filter((corner) => corner.z > 0.05)
+  const corners = facing.length > 0 ? facing : ring
+  const nearest = corners.reduce((best, corner) =>
+    Math.abs(Math.abs(corner.x) - outward) < Math.abs(Math.abs(best.x) - outward) ? corner : best,
+  )
+
+  return {
+    x: Math.abs(nearest.x) * profile.rx(t),
+    z: nearest.z * profile.rz(t) + (profile.dz?.(t) ?? 0),
+  }
+}
+
+export function skull(forge: Forge): Placed {
+  const { palette, res, shape, dims } = forge
+  const profile = skullProfile(forge)
 
   return {
     name: 'skull',
@@ -206,8 +237,8 @@ export function face(forge: Forge, type: CreatureSpec['head']['type']): Placed[]
             sides: res.sides(5),
             sections: sample(
               {
-                rx: (t) => dims.headW * shape.wide * (0.32 - 0.14 * t),
-                rz: (t) => dims.headH * shape.deep * (0.3 - 0.15 * t),
+                rx: (t) => dims.headW * shape.wide * (0.26 - 0.11 * t),
+                rz: (t) => dims.headH * shape.deep * (0.24 - 0.12 * t),
                 dz: (t) => dims.headH * 0.09 * t * t,
               },
               dims.headLen,
@@ -231,7 +262,7 @@ export function face(forge: Forge, type: CreatureSpec['head']['type']): Placed[]
             sides: res.sides(4),
             sections: sample(
               {
-                rx: (t) => dims.headW * 0.26 * shape.wide * (1 - t) ** 1.3,
+                rx: (t) => dims.headW * 0.21 * shape.wide * (1 - t) ** 1.3,
                 rz: (t) => dims.headH * 0.24 * shape.deep * (1 - t) ** 1.2,
                 dz: (t) => dims.headH * 0.17 * t ** 1.4,
               },
@@ -255,8 +286,8 @@ export function face(forge: Forge, type: CreatureSpec['head']['type']): Placed[]
         sides: res.sides(6),
         sections: sample(
           {
-            rx: (t) => dims.headW * shape.wide * (0.4 - 0.06 * t),
-            rz: (t) => dims.headH * shape.deep * (0.33 - 0.07 * t),
+            rx: (t) => dims.headW * shape.wide * (0.33 - 0.05 * t),
+            rz: (t) => dims.headH * shape.deep * (0.28 - 0.06 * t),
             dz: (t) => dims.headH * 0.05 * t,
           },
           dims.headLen * 0.55,
@@ -301,30 +332,41 @@ export function face(forge: Forge, type: CreatureSpec['head']['type']): Placed[]
   ]
 }
 
-export function eyes({ dims, palette, res, shape }: Forge, count: number): Placed[] {
+export function eyes(forge: Forge, count: number): Placed[] {
   if (count === 0) return []
+  const { dims, palette, res, shape } = forge
   const pairs = count / 2
-  const size = Math.max(0.025, dims.headW * (pairs > 2 ? 0.085 : 0.11))
+  const size = dims.headW * (pairs > 2 ? 0.13 : 0.19)
 
-  return Array.from({ length: pairs }).flatMap((_, row) =>
-    [-1, 1].map((side) => ({
+  return Array.from({ length: pairs }).flatMap((_, row) => {
+    // Above the muzzle, climbing the skull as pairs are added.
+    const height = Math.min(0.94, 0.72 + row * 0.11)
+    const outward = 0.78 - row * 0.08
+    const on = skullFront(forge, height, outward)
+
+    return [-1, 1].map((side) => ({
       name: `eye${row}${side < 0 ? 'L' : 'R'}`,
       geometry: pointForward(
         prism({
-          sides: res.sides(4),
-          sections: sample({ rx: taper(size, size * 0.66), rz: taper(size * 0.7, size * 0.44) }, size * 0.95, 1),
+          sides: res.sides(5),
+          sections: sample(
+            {
+              rx: (t) => size * (0.5 + 0.55 * Math.sin(Math.PI * t ** 0.8)),
+              rz: (t) => size * 0.78 * (0.5 + 0.55 * Math.sin(Math.PI * t ** 0.8)),
+            },
+            size * 1.25,
+            res.bands(2),
+            res.cluster,
+          ),
           shape: section(shape),
-          colors: { side: palette.eye },
+          colors: { side: palette.eye, cap: palette.eye },
         }),
       ),
-      // Extra pairs climb the skull and tuck inward, the way a spider's do.
-      position: {
-        x: side * dims.headW * (0.26 - row * 0.05),
-        y: dims.headH * (0.5 + row * 0.17),
-        z: dims.headD * (0.34 - row * 0.03),
-      },
-    })),
-  )
+      // Set back into the skull so it reads as an eye in a socket, not a bead
+      // glued on, but far enough out that most of it is still outside.
+      position: { x: side * on.x, y: dims.headH * height, z: on.z - size * 0.28 },
+    }))
+  })
 }
 
 export function horns({ dims, palette, res, shape }: Forge, count: number): Placed[] {
@@ -434,7 +476,9 @@ export function limb(
   // A bound limb flares where it meets the body, so it reads as growing out of
   // it rather than being posted into it. An unbound one has nothing to hide:
   // its seam is the look.
-  const collar = (t: number) => 1 + embed * 2.1 * Math.max(0, (t - 0.72) / 0.28) ** 1.4
+  // Gentle and early rather than a sudden disc at the very top: a sharp flare
+  // reads as a spike the moment the limb swings clear of the body.
+  const collar = (t: number) => 1 + embed * 1.15 * Math.max(0, (t - 0.55) / 0.45) ** 1.8
   const width = (t: number) => (far + (near - far) * t + swell * hump(t, peak)) * collar(t)
 
   const profile: Profile = {

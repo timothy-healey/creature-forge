@@ -29,9 +29,9 @@ export interface SkinOptions {
   pieces: readonly SkinPiece[]
   material: THREE.Material
   /**
-   * How close two vertices must be to share a normal and a set of weights.
-   * Parts interpenetrate rather than meeting exactly, so an exact weld never
-   * joins one to another; this is what carries shading across a joint.
+   * How close two vertices must be to share a normal. Parts interpenetrate
+   * rather than meeting exactly, so an exact weld never joins one to another;
+   * this is what carries shading across a joint.
    */
   fuse: number
 }
@@ -148,7 +148,7 @@ export function buildSkin(options: SkinOptions): THREE.SkinnedMesh {
   geometry.setAttribute('skinWeight', new THREE.BufferAttribute(skinWeights, 4))
   geometry.setIndex(indices)
   geometry.computeVertexNormals()
-  fuseNeighbours(geometry, vertices, options.fuse)
+  fuseNormals(geometry, options.fuse)
 
   const mesh = new THREE.SkinnedMesh(geometry, options.material)
   mesh.name = 'skin'
@@ -162,21 +162,24 @@ export function buildSkin(options: SkinOptions): THREE.SkinnedMesh {
 }
 
 /**
- * Averages normals and weights between vertices that are merely near each other
- * rather than identical.
+ * Averages normals between vertices that are merely near each other rather than
+ * identical, so shading flows across a joint where two parts overlap instead of
+ * meeting vertex to vertex.
  *
- * An exact weld only ever joins a part to itself, because parts overlap instead
- * of meeting vertex to vertex. Positions and colours stay exact — so the palette
- * keeps its hard edges — while shading and skinning flow across the junction,
- * which is what stops an elbow looking like two pipes that happen to touch.
+ * Normals only. Fusing *weights* this way was a mistake: a cell at the shoulder
+ * holds both torso and limb vertices, and merging their weights handed the torso
+ * a share of the arm — so the arm swung and dragged a spike of torso with it.
+ * Weights follow the bone hierarchy, never proximity.
+ *
+ * Even for normals, a vertex only joins the average if it already faces roughly
+ * the same way as the group. Two surfaces back to back in one cell would
+ * otherwise flatten each other into a crease.
  */
-function fuseNeighbours(geometry: THREE.BufferGeometry, vertices: readonly Welded[], cell: number): void {
+function fuseNormals(geometry: THREE.BufferGeometry, cell: number): void {
   if (cell <= 0) return
 
   const position = geometry.getAttribute('position')
   const normal = geometry.getAttribute('normal')
-  const weights = geometry.getAttribute('skinWeight') as THREE.BufferAttribute
-  const indices = geometry.getAttribute('skinIndex') as THREE.BufferAttribute
 
   const groups = new Map<string, number[]>()
   for (let i = 0; i < position.count; i++) {
@@ -190,38 +193,35 @@ function fuseNeighbours(geometry: THREE.BufferGeometry, vertices: readonly Welde
     else groups.set(key, [i])
   }
 
-  const averaged = new THREE.Vector3()
+  const mean = new THREE.Vector3()
+  const facing = new THREE.Vector3()
+  const agreed = new THREE.Vector3()
+
   for (const group of groups.values()) {
     if (group.length < 2) continue
 
-    averaged.set(0, 0, 0)
-    const shared = new Map<number, number>()
-    for (const i of group) {
-      averaged.x += normal.getX(i)
-      averaged.y += normal.getY(i)
-      averaged.z += normal.getZ(i)
-      for (const [bone, weight] of vertices[i]!.weights) {
-        shared.set(bone, (shared.get(bone) ?? 0) + weight)
-      }
-    }
-    if (averaged.lengthSq() > 1e-12) averaged.normalize()
+    mean.set(0, 0, 0)
+    for (const i of group) mean.set(mean.x + normal.getX(i), mean.y + normal.getY(i), mean.z + normal.getZ(i))
+    if (mean.lengthSq() < 1e-12) continue
+    mean.normalize()
 
-    const strongest = [...shared.entries()].sort((a, b) => b[1] - a[1]).slice(0, MAX_INFLUENCES)
-    const total = strongest.reduce((sum, [, weight]) => sum + weight, 0) || 1
+    const facingSameWay = group.filter((i) => {
+      facing.set(normal.getX(i), normal.getY(i), normal.getZ(i))
+      return facing.dot(mean) > 0.2
+    })
+    if (facingSameWay.length < 2) continue
 
-    for (const i of group) {
-      normal.setXYZ(i, averaged.x, averaged.y, averaged.z)
-      for (let slot = 0; slot < MAX_INFLUENCES; slot++) {
-        const entry = strongest[slot]
-        indices.setComponent(i, slot, entry ? entry[0] : 0)
-        weights.setComponent(i, slot, entry ? entry[1] / total : 0)
-      }
+    agreed.set(0, 0, 0)
+    for (const i of facingSameWay) {
+      agreed.set(agreed.x + normal.getX(i), agreed.y + normal.getY(i), agreed.z + normal.getZ(i))
     }
+    if (agreed.lengthSq() < 1e-12) continue
+    agreed.normalize()
+
+    for (const i of facingSameWay) normal.setXYZ(i, agreed.x, agreed.y, agreed.z)
   }
 
   normal.needsUpdate = true
-  weights.needsUpdate = true
-  indices.needsUpdate = true
 }
 
 function parentBone(bone: THREE.Bone): THREE.Bone | null {

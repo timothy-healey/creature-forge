@@ -206,3 +206,35 @@ describe('how much a skinned creature actually bends', () => {
     expect(generate(skinned()).triangleCount).toBeGreaterThan(generate(defaultSpec()).triangleCount)
   })
 })
+
+describe('a posed skin', () => {
+  test('never pulls a triangle into a spike', () => {
+    const creature = generate(skinned())
+    const mesh = theSkinOf(creature)
+    creature.root.updateMatrixWorld(true)
+
+    const position = mesh.geometry.getAttribute('position')
+    const index = mesh.geometry.getIndex()!
+    const at = (i: number) => mesh.applyBoneTransform(i, new THREE.Vector3().fromBufferAttribute(position, i))
+
+    const before = Array.from({ length: position.count }, (_, i) => at(i).clone())
+    for (const joint of ['frontUpperL', 'backUpperL', 'backLowerL', 'head', 'spine']) {
+      creature.joints[joint]!.rotation.x += 0.7
+    }
+    creature.root.updateMatrixWorld(true)
+    const after = Array.from({ length: position.count }, (_, i) => at(i))
+    const shift = before.map((point, i) => point.distanceTo(after[i]!))
+
+    // A triangle whose corners move far apart relative to its own size has been
+    // pulled into a spike — the signature of a vertex following the wrong bone.
+    let worst = 0
+    for (let t = 0; t < index.count; t += 3) {
+      const [a, b, c] = [index.getX(t), index.getX(t + 1), index.getX(t + 2)]
+      const edge = Math.max(before[a]!.distanceTo(before[b]!), before[b]!.distanceTo(before[c]!), 1e-6)
+      const spread = Math.max(shift[a]!, shift[b]!, shift[c]!) - Math.min(shift[a]!, shift[b]!, shift[c]!)
+      worst = Math.max(worst, spread / edge)
+    }
+
+    expect(worst).toBeLessThan(3)
+  })
+})

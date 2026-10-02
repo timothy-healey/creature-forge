@@ -176,6 +176,10 @@ export function prism(options: PrismOptions): THREE.BufferGeometry {
  * still reaches `rz` and the belly reaches `rz * frontBias`, with the origin
  * resting at the waist of the shape.
  */
+export function crossSectionRing(sides: number, shape: CrossSection): { x: number; z: number }[] {
+  return unitRing(sides, shape)
+}
+
 function unitRing(sides: number, shape: CrossSection): { x: number; z: number }[] {
   const exponent = 2 / Math.max(0.4, shape.power)
   const bias = Math.max(0.05, shape.frontBias)
@@ -325,22 +329,38 @@ export interface Resolution {
   cluster: number
 }
 
+export interface ResolutionNeeds {
+  /** The surface will be deformed by a joint, so it needs rings at its ends. */
+  bending?: boolean
+  /**
+   * Something will rework the surface triangle by triangle, so it needs
+   * triangles. A limb described by forty of them has four lumps to inflate and
+   * forty plates to shatter into, which is not enough of either to notice.
+   */
+  dense?: boolean
+}
+
 /**
  * `edge` runs soft to sharp. A soft creature gets more corners around each
  * cross-section; a sharp one gets few, so its facets read as planes.
  */
-export function resolutionFor(detail: number, edge = 0.5, bending = false): Resolution {
+export function resolutionFor(detail: number, edge = 0.5, needs: ResolutionNeeds = {}): Resolution {
   const level = Math.min(1, Math.max(0, Number.isFinite(detail) ? detail : 0.5))
   const hardness = Math.min(1, Math.max(0, Number.isFinite(edge) ? edge : 0.5))
-  const sideScale = (0.6 + level * 1.4) * (1.42 - hardness * 0.84)
+  const richer = needs.bending || needs.dense
+  const sideScale = (0.6 + level * 1.4) * (1.42 - hardness * 0.84) * (needs.dense ? 1.3 : 1)
   const bandScale = 0.5 + level * 2.5
 
   return {
     sides: (base) => Math.max(3, Math.min(14, Math.round(base * sideScale))),
-    // A part that has to bend needs rings to bend with, so it gets more.
-    bands: (base) => Math.max(bending ? 4 : 1, Math.min(14, Math.round(base * bandScale) + (bending ? 2 : 0))),
+    bands: (base) =>
+      Math.max(
+        needs.bending ? 4 : needs.dense ? 3 : 1,
+        Math.min(14, Math.round(base * bandScale) + (richer ? 2 : 0)),
+      ),
     repeats: (base) => Math.max(1, Math.min(16, Math.round(base * (0.6 + level * 1.2)))),
-    cluster: bending ? 0.85 : 0,
+    // Clustering serves a bend. A surface effect wants its triangles spread out.
+    cluster: needs.bending && !needs.dense ? 0.85 : 0,
   }
 }
 

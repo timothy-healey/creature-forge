@@ -178,3 +178,61 @@ describe('rolled creatures', () => {
     }
   })
 })
+
+describe('eyes you can actually see', () => {
+  /** The only question that matters: looking at the creature, is the eye there. */
+  function hiddenEyes(spec: CreatureSpec): number {
+    const creature = generate(spec)
+    creature.root.updateMatrixWorld(true)
+
+    const meshes: THREE.Mesh[] = []
+    creature.root.traverse((node) => {
+      if ((node as THREE.Mesh).isMesh) meshes.push(node as THREE.Mesh)
+    })
+
+    const caster = new THREE.Raycaster()
+    let hidden = 0
+    for (const eye of meshes.filter((mesh) => mesh.name.startsWith('eye'))) {
+      const centre = new THREE.Box3().expandByObject(eye).getCenter(new THREE.Vector3())
+      const seen = [0, 0.35, -0.35].some((yaw) => {
+        const from = centre.clone().add(new THREE.Vector3(Math.sin(yaw) * 4, 0.25, Math.cos(yaw) * 4))
+        caster.set(from, centre.clone().sub(from).normalize())
+        return caster.intersectObjects(meshes, false)[0]?.object.name.startsWith('eye') ?? false
+      })
+      if (!seen) hidden++
+    }
+    return hidden
+  }
+
+  test.each(HEAD_TYPES)('are not swallowed by a %s face', (type) => {
+    expect(hiddenEyes(edited((spec) => void (spec.head.type = type)))).toBe(0)
+  })
+
+  test.each(EYE_COUNTS.filter((count) => count > 0))('all %i of them are visible', (count) => {
+    expect(hiddenEyes(edited((spec) => void (spec.head.eyes = count)))).toBe(0)
+  })
+
+  test('stay visible across every head shape the sliders can make', () => {
+    let hidden = 0
+    for (let i = 0; i < 48; i++) {
+      const spec = randomSpec()
+      spec.head.eyes = 2
+      hidden += hiddenEyes(spec)
+    }
+
+    expect(hidden).toBe(0)
+  })
+
+  test('are big enough to read — a good fraction of the skull, not a speck', () => {
+    const creature = generate(defaultSpec())
+    const skull = new THREE.Box3()
+    const eye = new THREE.Box3()
+    creature.root.traverse((node) => {
+      if (node.name === 'skull') skull.expandByObject(node)
+      if (node.name === 'eye0L') eye.expandByObject(node)
+    })
+
+    const width = (box: THREE.Box3) => box.max.x - box.min.x
+    expect(width(eye) / width(skull)).toBeGreaterThan(0.25)
+  })
+})
