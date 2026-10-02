@@ -574,3 +574,69 @@ describe('the exploded mutation', () => {
     }
   })
 })
+
+describe('the recursive mutation', () => {
+  const branching = (edit: (spec: CreatureSpec) => void = () => {}): CreatureSpec => {
+    const spec = defaultSpec()
+    spec.body.mutation = 'recursive'
+    edit(spec)
+    return spec
+  }
+
+  test('sprouts a smaller limb from the end of every limb', () => {
+    const plain = generate(defaultSpec())
+    const fractal = generate(branching())
+
+    const branches = Object.keys(fractal.joints).filter((name) => /B\d(Upper|Lower|Foot)$/.test(name))
+    expect(branches.length).toBe(Object.keys(plain.joints).filter((n) => n.includes('Upper')).length * 6)
+  })
+
+  test('makes each generation smaller than the one it grew from', () => {
+    const creature = generate(branching())
+    creature.root.updateMatrixWorld(true)
+
+    const span = (name: string) => {
+      const box = new THREE.Box3().expandByObject(creature.joints[name]!)
+      return box.getSize(new THREE.Vector3()).length()
+    }
+
+    expect(span('backUpperLB0Upper')).toBeLessThan(span('backUpperL'))
+  })
+
+  test('terminates — it does not branch forever', () => {
+    const depths = Object.keys(generate(branching()).joints).map((name) => (name.match(/B\d/g) ?? []).length)
+
+    expect(Math.max(...depths)).toBe(1)
+  })
+
+  test('still stands on the ground, now on its smallest toes', () => {
+    const creature = generate(branching())
+    creature.root.updateMatrixWorld(true)
+
+    expect(new THREE.Box3().setFromObject(creature.root).min.y).toBeCloseTo(0, 1)
+  })
+
+  test('costs more triangles than the body it branches from', () => {
+    expect(generate(branching()).triangleCount).toBeGreaterThan(generate(defaultSpec()).triangleCount)
+  })
+
+  test('reaches every limb, however many the body happens to have', () => {
+    const creature = generate(branching())
+    const uppers = Object.keys(creature.joints).filter((name) => /Upper[LR]$/.test(name))
+
+    for (const name of uppers) {
+      expect(creature.joints[`${name}B0Upper`], `${name} never branched`).toBeDefined()
+      expect(creature.joints[`${name}B1Upper`], `${name} branched only once`).toBeDefined()
+    }
+  })
+
+  test('builds in both mesh modes', () => {
+    for (const mesh of MESH_MODES) {
+      const creature = generate(branching((spec) => void (spec.body.mesh = mesh)))
+      creature.root.updateMatrixWorld(true)
+
+      expect(new THREE.Box3().setFromObject(creature.root).min.y, mesh).toBeCloseTo(0, 1)
+      expect(creature.triangleCount, mesh).toBeGreaterThan(0)
+    }
+  })
+})

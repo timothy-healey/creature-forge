@@ -69,6 +69,7 @@ export function generate(input: CreatureSpec): Creature {
   const res = resolutionFor(spec.detail.level, spec.shape.edge)
   const radial = spec.body.mutation === 'radial'
   const segmented = spec.body.mutation === 'segmented'
+  const branching = spec.body.mutation === 'recursive' ? 1 : 0
   // A ring of limbs has no front to lean into; a chain of them only works flat.
   const pitch = radial ? 0 : segmented ? 1.36 : PITCH[spec.body.build]
   const planted = spec.body.frontLimb === 'forelegs'
@@ -250,6 +251,8 @@ export function generate(input: CreatureSpec): Creature {
     bend: readonly [number, number]
     ending: 'foot' | 'hand'
     footScale?: number
+    /** How many more times this limb sprouts smaller copies of itself. */
+    branch?: number
   }): THREE.Object3D {
     const [upperName, lowerName, footName] = options.names
     const upper = joint(upperName, options.parent, options.at, options.pose)
@@ -290,6 +293,32 @@ export function generate(input: CreatureSpec): Creature {
       mesh(`${footName}Mesh`, end, parts.hand(forge, options.thickness))
     }
 
+    // A limb that branches is a different body from one that is merely longer:
+    // the tree gets deeper rather than wider, and the same rule runs at every
+    // scale until it runs out.
+    const remaining = options.branch ?? 0
+    if (remaining > 0) {
+      for (const side of [-1, 1]) {
+        limbChain({
+          names: [
+            `${upperName}B${side < 0 ? 0 : 1}Upper`,
+            `${upperName}B${side < 0 ? 0 : 1}Lower`,
+            `${upperName}B${side < 0 ? 0 : 1}Foot`,
+          ],
+          parent: end,
+          at: { x: 0, y: -footHeight * 0.3, z: 0 },
+          pose: rest(-0.35, 0, side * 0.72),
+          upperLen: options.upperLen * 0.52,
+          lowerLen: options.lowerLen * 0.52,
+          thickness: options.thickness * 0.56,
+          bend: options.bend,
+          ending: options.ending,
+          footScale: (options.footScale ?? 1) * 0.6,
+          branch: remaining - 1,
+        })
+      }
+    }
+
     return upper
   }
 
@@ -325,6 +354,7 @@ export function generate(input: CreatureSpec): Creature {
         thickness: dims.legThick,
         bend: [0.62, -0.26],
         ending: 'foot',
+        branch: branching,
       })
     }
   } else if (segmented) {
@@ -350,6 +380,7 @@ export function generate(input: CreatureSpec): Creature {
           bend: [0.3, -0.12],
           ending: 'foot',
           footScale: 0.8,
+          branch: branching,
         })
       }
     })
@@ -366,6 +397,7 @@ export function generate(input: CreatureSpec): Creature {
         thickness: dims.legThick,
         bend: [digitigrade ? -1.0 : -0.08, digitigrade ? 0.48 : 0.04],
         ending: 'foot',
+        branch: branching,
       })
     }
   }
@@ -413,6 +445,7 @@ export function generate(input: CreatureSpec): Creature {
         bend: [planted ? 0.12 : 0.2, planted ? 0.04 : 0],
         ending: planted ? 'foot' : 'hand',
         footScale: 0.85,
+        branch: branching,
       })
     })
   }
