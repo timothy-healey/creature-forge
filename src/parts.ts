@@ -350,7 +350,9 @@ export function eyes(forge: Forge, count: number): Placed[] {
   return Array.from({ length: pairs }).flatMap((_, row) => {
     // Above the muzzle, climbing the skull as pairs are added.
     const height = Math.min(0.94, 0.72 + row * 0.11)
-    const outward = 0.78 - row * 0.08
+    // Out at the widest part of the skull, which a centred muzzle can never
+    // reach across however long it grows.
+    const outward = 0.94 - row * 0.1
     const on = skullFront(forge, height, outward)
 
     return [-1, 1].map((side) => ({

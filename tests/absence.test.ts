@@ -17,6 +17,17 @@ import {
   type CreatureSpec,
 } from '../src/spec'
 
+/** A small deterministic generator, so a sweep is reproducible. */
+function seeded(seed: number): () => number {
+  let state = seed >>> 0
+  return () => {
+    state = (state + 0x6d2b79f5) >>> 0
+    let t = Math.imul(state ^ (state >>> 15), 1 | state)
+    t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t
+    return ((t ^ (t >>> 14)) >>> 0) / 4294967296
+  }
+}
+
 const edited = (edit: (spec: CreatureSpec) => void): CreatureSpec => {
   const spec = defaultSpec()
   edit(spec)
@@ -216,9 +227,13 @@ describe('eyes you can actually see', () => {
   })
 
   test('stay visible across every head shape the sliders can make', () => {
+    // Seeded. An unseeded sweep turns a rare shape into a coin flip, and a test
+    // that fails one run in twelve tells you nothing you can act on.
+    const roll = seeded(20261002)
+
     let hidden = 0
-    for (let i = 0; i < 48; i++) {
-      const spec = randomSpec()
+    for (let i = 0; i < 120; i++) {
+      const spec = randomSpec(roll)
       spec.head.eyes = 2
       hidden += hiddenEyes(spec)
     }
