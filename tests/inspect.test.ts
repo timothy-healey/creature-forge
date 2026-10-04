@@ -22,7 +22,8 @@ function drawn(spec: CreatureSpec, lenses: readonly string[]): SVGSVGElement {
   return inspector.element
 }
 
-const visible = (svg: SVGSVGElement) => [...svg.children].filter((node) => !node.hasAttribute('hidden'))
+const visible = (svg: SVGSVGElement) =>
+  ([...svg.children] as SVGElement[]).filter((node) => node.style.display !== 'none')
 
 describe('the inspect overlay', () => {
   test('draws nothing at all when no lens is on', () => {
@@ -124,5 +125,73 @@ describe('the inspect overlay', () => {
 
     // More detail is more bands, and the overlay finds them in the built mesh.
     expect(fine).toBeGreaterThan(coarse)
+  })
+})
+
+function cameraAt(x: number, y: number, z: number): THREE.PerspectiveCamera {
+  const camera = new THREE.PerspectiveCamera(42, 1.1, 0.1, 50)
+  camera.position.set(x, y, z)
+  camera.lookAt(0, 0.8, 0)
+  camera.updateMatrixWorld(true)
+  // The renderer normally does this; without it, projection uses a stale inverse.
+  camera.matrixWorldInverse.copy(camera.matrixWorld).invert()
+  return camera
+}
+
+/** Both coordinates: a mark on the axis the camera orbits cannot move in x. */
+const snapshot = (svg: SVGSVGElement) =>
+  [...svg.children]
+    .filter((n) => (n as SVGElement).style.display !== 'none')
+    .map((n) => {
+      const x = n.getAttribute('x1') ?? n.getAttribute('cx') ?? n.getAttribute('x')
+      const y = n.getAttribute('y1') ?? n.getAttribute('cy') ?? n.getAttribute('y')
+      return `${n.tagName}:${x},${y}:${n.getAttribute('points')?.slice(0, 24) ?? ''}`
+    })
+    .join('|')
+
+describe('overlay follows the camera', () => {
+  test.each(LENSES)('%s marks move when the camera does', (lens) => {
+    const inspector = createInspector()
+    inspector.show(generate(defaultSpec()))
+    inspector.setLenses(new Set([lens]))
+
+    inspector.draw(cameraAt(1.9, 1.5, 2.9), 900, 600, 0)
+    const before = snapshot(inspector.element)
+
+    inspector.draw(cameraAt(-2.6, 2.2, 1.1), 900, 600, 0)
+    const after = snapshot(inspector.element)
+
+    expect(before.length).toBeGreaterThan(0)
+    expect(after, `${lens} did not follow the camera`).not.toBe(before)
+  })
+
+  test('no mark is left behind when the lens set shrinks', () => {
+    const inspector = createInspector()
+    inspector.show(generate(defaultSpec()))
+
+    inspector.setLenses(new Set(LENSES))
+    inspector.draw(cameraAt(1.9, 1.5, 2.9), 900, 600, 0)
+    const many = snapshot(inspector.element).split('|').length
+
+    inspector.setLenses(new Set(['rig']))
+    inspector.draw(cameraAt(1.9, 1.5, 2.9), 900, 600, 0)
+    const few = snapshot(inspector.element).split('|').length
+
+    expect(few).toBeLessThan(many)
+  })
+
+  test('no mark survives a new creature being shown', () => {
+    const inspector = createInspector()
+    inspector.show(generate(defaultSpec()))
+    inspector.setLenses(new Set(['rings']))
+    inspector.draw(cameraAt(1.9, 1.5, 2.9), 900, 600, 0)
+    const first = snapshot(inspector.element)
+
+    const other = defaultSpec()
+    other.body.mutation = 'segmented'
+    inspector.show(generate(other))
+    inspector.draw(cameraAt(1.9, 1.5, 2.9), 900, 600, 0)
+
+    expect(snapshot(inspector.element)).not.toBe(first)
   })
 })

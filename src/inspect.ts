@@ -114,12 +114,17 @@ export function createInspector(): Inspector {
         node?.remove()
         node = document.createElementNS('http://www.w3.org/2000/svg', wanted)
         pool[i] = node
-        svg.appendChild(node)
+        // At its own index, so paint order keeps matching mark order.
+        svg.insertBefore(node, svg.children[i] ?? null)
       }
       apply(node, mark)
-      node.removeAttribute('hidden')
+      node.style.display = ''
     }
-    for (let i = marks.length; i < pool.length; i++) pool[i]!.setAttribute('hidden', '')
+    // `hidden` is an HTML attribute: the UA rule that acts on it does not reach
+    // SVG children, so a mark hidden that way stays on screen as a ghost of
+    // wherever the creature last was. Display is the only thing that works in
+    // both namespaces.
+    for (let i = marks.length; i < pool.length; i++) pool[i]!.style.display = 'none'
   }
 
   return {
