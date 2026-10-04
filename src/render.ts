@@ -133,6 +133,27 @@ export function frameDistance(radius: number, fov: number, aspect: number, margi
   return (span * margin) / Math.max(0.0001, Math.sin(limiting / 2))
 }
 
+/**
+ * Where the camera stands when nobody has moved it: a three-quarter view from
+ * a little above the creature's own eye level, looking down.
+ */
+export const HOUSE_VIEW = { azimuth: 0.62, elevation: 0.36 }
+
+/** A point on a sphere around `centre`, by compass bearing and angle above it. */
+export function orbitPoint(
+  centre: THREE.Vector3,
+  distance: number,
+  azimuth: number,
+  elevation: number,
+): THREE.Vector3 {
+  const flat = Math.cos(elevation) * distance
+  return new THREE.Vector3(
+    centre.x + Math.sin(azimuth) * flat,
+    centre.y + Math.sin(elevation) * distance,
+    centre.z + Math.cos(azimuth) * flat,
+  )
+}
+
 /** A low sky dome, coloured per vertex so a gradient costs no shader. */
 function skyDome(horizon: THREE.Color, zenith: THREE.Color): THREE.Mesh {
   const geometry = new THREE.SphereGeometry(30, 14, 9)
@@ -201,6 +222,9 @@ export function createViewport(canvas: HTMLCanvasElement): Viewport {
   camera.position.set(1.9, 1.5, 2.9)
 
   const controls = new OrbitControls(camera, canvas)
+  controls.addEventListener('start', () => {
+    orbited = true
+  })
   controls.enableDamping = true
   controls.dampingFactor = 0.12
   controls.minDistance = 0.6
@@ -220,6 +244,8 @@ export function createViewport(canvas: HTMLCanvasElement): Viewport {
   let sky: THREE.Mesh | null = null
   let grid: THREE.GridHelper | null = null
   let standing: Background | null = null
+  // Once someone orbits, the angle is theirs; until then it is the house view.
+  let orbited = false
 
   /** Rebuilds the place the creature is standing in. */
   function setScenery(kind: Background): void {
@@ -336,10 +362,19 @@ export function createViewport(canvas: HTMLCanvasElement): Viewport {
     controls.target.copy(sphere.center)
 
     const needed = frameDistance(sphere.radius, camera.fov, camera.aspect)
+    const wanted = THREE.MathUtils.clamp(needed, controls.minDistance, controls.maxDistance)
+
+    // Nobody has orbited: take the house angle outright rather than inheriting
+    // whatever direction the camera happens to be pointing from its last frame.
+    if (!orbited) {
+      camera.position.copy(orbitPoint(controls.target, wanted, HOUSE_VIEW.azimuth, HOUSE_VIEW.elevation))
+      controls.update()
+      return
+    }
+
     const now = camera.position.distanceTo(controls.target)
     if (now >= needed && now <= needed * 2.1) return
 
-    const wanted = THREE.MathUtils.clamp(needed, controls.minDistance, controls.maxDistance)
     const direction = camera.position.clone().sub(controls.target)
     if (direction.lengthSq() < 1e-8) direction.set(1, 0.7, 1.5)
     camera.position.copy(controls.target).add(direction.setLength(wanted))

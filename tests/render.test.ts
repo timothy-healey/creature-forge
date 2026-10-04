@@ -7,7 +7,9 @@ import {
   createWardrobe,
   defaultView,
   frameDistance,
+  HOUSE_VIEW,
   materialFor,
+  orbitPoint,
   type RenderMode,
 } from '../src/render'
 import { generate } from '../src/generate'
@@ -217,5 +219,52 @@ describe('framing the creature', () => {
       expect(distance, mutation).toBeGreaterThan(0.6)
       expect(distance, mutation).toBeLessThan(14)
     }
+  })
+})
+
+describe('where the camera stands', () => {
+  const centre = new THREE.Vector3(0, 0.9, 0)
+
+  test('the house view looks down, not along', () => {
+    const eye = orbitPoint(centre, 3, HOUSE_VIEW.azimuth, HOUSE_VIEW.elevation)
+
+    expect(eye.y).toBeGreaterThan(centre.y)
+  })
+
+  test('it clears the creature’s own head rather than sitting level with it', () => {
+    // A default creature is about 1.8 tall, so its centre sits near 0.9.
+    const eye = orbitPoint(centre, 3, HOUSE_VIEW.azimuth, HOUSE_VIEW.elevation)
+
+    expect(eye.y).toBeGreaterThan(1.8)
+  })
+
+  test('it is a three-quarter view, off both axes', () => {
+    const eye = orbitPoint(centre, 3, HOUSE_VIEW.azimuth, HOUSE_VIEW.elevation)
+
+    expect(Math.abs(eye.x)).toBeGreaterThan(0.4)
+    expect(Math.abs(eye.z)).toBeGreaterThan(0.4)
+  })
+
+  test('it is not so steep that the creature is read from above', () => {
+    expect(HOUSE_VIEW.elevation).toBeLessThan(Math.PI / 4)
+  })
+
+  test('stands exactly the distance it was asked for, whatever the angle', () => {
+    for (const azimuth of [0, 0.62, 2.1, -1.4]) {
+      for (const elevation of [0, 0.36, 1.1]) {
+        expect(orbitPoint(centre, 3, azimuth, elevation).distanceTo(centre)).toBeCloseTo(3, 6)
+      }
+    }
+  })
+
+  test('keeps the creature centred: the target is the bounds centre, not the floor', () => {
+    const creature = generate(defaultSpec())
+    creature.root.updateMatrixWorld(true)
+    const bounds = new THREE.Box3().setFromObject(creature.root)
+    const sphere = bounds.getBoundingSphere(new THREE.Sphere())
+
+    expect(sphere.center.y).toBeGreaterThan(bounds.min.y)
+    expect(sphere.center.y).toBeLessThan(bounds.max.y)
+    expect(Math.abs(sphere.center.y - (bounds.min.y + bounds.max.y) / 2)).toBeLessThan(1e-6)
   })
 })
