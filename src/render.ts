@@ -115,6 +115,24 @@ export function defaultView(): ViewSettings {
 
 const snapGrid = new THREE.Vector2(160, 120)
 
+/**
+ * How far back the camera has to sit for a sphere of `radius` to fit.
+ *
+ * The limiting angle is the vertical field of view on a wide viewport and the
+ * horizontal one on a tall viewport, so a near-square panel between two rails
+ * frames a creature as reliably as a cinema-shaped one does.
+ */
+export function frameDistance(radius: number, fov: number, aspect: number, margin = 1.22): number {
+  // Math.max(x, NaN) is NaN, so a clamp is not a guard: check the value.
+  const shape = Number.isFinite(aspect) && aspect > 0 ? aspect : 1
+  const span = Number.isFinite(radius) && radius > 0 ? radius : 1
+
+  const vertical = (fov * Math.PI) / 180
+  const horizontal = 2 * Math.atan(Math.tan(vertical / 2) * shape)
+  const limiting = Math.min(vertical, horizontal)
+  return (span * margin) / Math.max(0.0001, Math.sin(limiting / 2))
+}
+
 /** A low sky dome, coloured per vertex so a gradient costs no shader. */
 function skyDome(horizon: THREE.Color, zenith: THREE.Color): THREE.Mesh {
   const geometry = new THREE.SphereGeometry(30, 14, 9)
@@ -185,8 +203,8 @@ export function createViewport(canvas: HTMLCanvasElement): Viewport {
   const controls = new OrbitControls(camera, canvas)
   controls.enableDamping = true
   controls.dampingFactor = 0.12
-  controls.minDistance = 1.2
-  controls.maxDistance = 7
+  controls.minDistance = 0.6
+  controls.maxDistance = 14
   controls.maxPolarAngle = Math.PI * 0.52
   controls.target.set(0, 0.8, 0)
 
@@ -298,8 +316,34 @@ export function createViewport(canvas: HTMLCanvasElement): Viewport {
     inspector.show(next)
     dress(true)
 
+    reframe(next)
+  }
+
+  /**
+   * Keeps the creature in shot without stealing the camera.
+   *
+   * The target follows the creature's centre, which is cheap and never jumps,
+   * but the distance only moves when the creature no longer fits or has shrunk
+   * far inside the frame — so dragging a slider does not yank the view on every
+   * rebuild, and a creature that doubles in size is still in it.
+   */
+  function reframe(next: Creature): void {
+    next.root.updateMatrixWorld(true)
     const bounds = new THREE.Box3().setFromObject(next.root)
-    controls.target.set(0, bounds.max.y * 0.5, 0)
+    if (bounds.isEmpty()) return
+
+    const sphere = bounds.getBoundingSphere(new THREE.Sphere())
+    controls.target.copy(sphere.center)
+
+    const needed = frameDistance(sphere.radius, camera.fov, camera.aspect)
+    const now = camera.position.distanceTo(controls.target)
+    if (now >= needed && now <= needed * 2.1) return
+
+    const wanted = THREE.MathUtils.clamp(needed, controls.minDistance, controls.maxDistance)
+    const direction = camera.position.clone().sub(controls.target)
+    if (direction.lengthSq() < 1e-8) direction.set(1, 0.7, 1.5)
+    camera.position.copy(controls.target).add(direction.setLength(wanted))
+    controls.update()
   }
 
   function resize(): void {
@@ -313,6 +357,7 @@ export function createViewport(canvas: HTMLCanvasElement): Viewport {
       renderer.setSize(bufferWidth, bufferHeight, false)
       camera.aspect = bufferWidth / bufferHeight
       camera.updateProjectionMatrix()
+      if (creature) reframe(creature)
     }
   }
 

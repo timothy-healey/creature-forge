@@ -6,9 +6,12 @@ import {
   SCENERY,
   createWardrobe,
   defaultView,
+  frameDistance,
   materialFor,
   type RenderMode,
 } from '../src/render'
+import { generate } from '../src/generate'
+import { MUTATIONS, defaultSpec } from '../src/spec'
 
 /** What a viewer would actually notice about a material, as a comparable key. */
 function look(material: THREE.Material): string {
@@ -164,5 +167,55 @@ describe('the places a creature can stand', () => {
 
   test('the default view starts somewhere', () => {
     expect(BACKGROUNDS).toContain(defaultView().background)
+  })
+})
+
+describe('framing the creature', () => {
+  test('pushes the camera back further for a bigger creature', () => {
+    expect(frameDistance(2, 42, 1.6)).toBeGreaterThan(frameDistance(1, 42, 1.6))
+  })
+
+  test('scales linearly with size, because a camera is a similar triangle', () => {
+    expect(frameDistance(2, 42, 1.6)).toBeCloseTo(frameDistance(1, 42, 1.6) * 2, 6)
+  })
+
+  test('needs more room on a narrow viewport than a wide one', () => {
+    // On a tall panel the horizontal field is the limiting one, so the same
+    // creature has to sit further back than it would in a cinema frame.
+    expect(frameDistance(1, 42, 0.6)).toBeGreaterThan(frameDistance(1, 42, 1.8))
+  })
+
+  test('stops caring about aspect once the viewport is wider than it is tall', () => {
+    expect(frameDistance(1, 42, 2.4)).toBeCloseTo(frameDistance(1, 42, 1.0), 6)
+  })
+
+  test('leaves margin, so a creature never touches the frame edge', () => {
+    const tight = 1 / Math.sin((42 * Math.PI) / 180 / 2)
+
+    expect(frameDistance(1, 42, 1.6)).toBeGreaterThan(tight)
+  })
+
+  test('survives a degenerate viewport instead of returning nonsense', () => {
+    for (const aspect of [0, -1, Number.NaN]) {
+      const distance = frameDistance(1, 42, aspect)
+      expect(Number.isFinite(distance), String(aspect)).toBe(true)
+      expect(distance).toBeGreaterThan(0)
+    }
+  })
+
+  test('frames every creature the generator can make', () => {
+    for (const mutation of MUTATIONS) {
+      const spec = defaultSpec()
+      spec.body.mutation = mutation
+      const creature = generate(spec)
+      creature.root.updateMatrixWorld(true)
+
+      const sphere = new THREE.Box3().setFromObject(creature.root).getBoundingSphere(new THREE.Sphere())
+      const distance = frameDistance(sphere.radius, 42, 1.1)
+
+      // Inside the orbit limits the viewport actually allows.
+      expect(distance, mutation).toBeGreaterThan(0.6)
+      expect(distance, mutation).toBeLessThan(14)
+    }
   })
 })
