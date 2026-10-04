@@ -1,5 +1,5 @@
 import { describe, expect, test } from 'vitest'
-import { SLIDERS, clampSpec, defaultSpec, readSlider } from '../src/spec'
+import { SLIDERS, clampSpec, defaultSpec, identOf, randomSpec, readSlider } from '../src/spec'
 
 describe('defaultSpec', () => {
   test('puts every slider inside 0..1', () => {
@@ -67,5 +67,42 @@ describe('clampSpec', () => {
     const spec = defaultSpec()
 
     expect(clampSpec(spec)).toEqual(spec)
+  })
+})
+
+describe('identOf', () => {
+  test('names the same creature the same way every time', () => {
+    expect(identOf(defaultSpec())).toBe(identOf(defaultSpec()))
+  })
+
+  test('changes when any one slider does', () => {
+    const moved = defaultSpec()
+    moved.head.length = 0.51
+
+    expect(identOf(moved)).not.toBe(identOf(defaultSpec()))
+  })
+
+  test('changes when a part is swapped', () => {
+    const other = defaultSpec()
+    other.tail.type = 'club'
+
+    expect(identOf(other)).not.toBe(identOf(defaultSpec()))
+  })
+
+  test('ignores the difference between a spec and its clamped self', () => {
+    const loose = defaultSpec()
+    loose.head.length = 4.2
+
+    expect(identOf(loose)).toBe(identOf(clampSpec(loose)))
+  })
+
+  test('reads as three short blocks', () => {
+    expect(identOf(defaultSpec())).toMatch(/^[0-9A-Z]{4}-[0-9A-Z]{4}-[0-9A-Z]{4}$/)
+  })
+
+  test('rarely collides across many rolled creatures', () => {
+    const idents = new Set(Array.from({ length: 400 }, () => identOf(randomSpec())))
+
+    expect(idents.size).toBeGreaterThan(395)
   })
 })

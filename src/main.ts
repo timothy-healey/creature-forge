@@ -1,19 +1,24 @@
 import './style.css'
 import type { Gait } from './animate'
 import { generate } from './generate'
+import type { Lens } from './inspect'
 import { createViewport, defaultView, type ViewSettings } from './render'
-import { defaultSpec, type CreatureSpec } from './spec'
-import { mountUi } from './ui'
+import { defaultSpec, identOf, type CreatureSpec } from './spec'
+import { mountUi, reportTotals } from './ui'
 
-const canvas = document.querySelector<HTMLCanvasElement>('#viewport')
-const counter = document.querySelector<HTMLElement>('#triangles')
-const zones = {
-  modes: document.querySelector<HTMLElement>('#modes'),
-  mutations: document.querySelector<HTMLElement>('#mutations'),
-  body: document.querySelector<HTMLElement>('#body'),
+const need = <T extends Element>(selector: string): T => {
+  const node = document.querySelector<T>(selector)
+  if (!node) throw new Error(`the sheet is missing ${selector}`)
+  return node
 }
-if (!canvas || !counter || !zones.modes || !zones.mutations || !zones.body) {
-  throw new Error('the page is missing its viewport or one of its control zones')
+
+const canvas = need<HTMLCanvasElement>('#viewport')
+const zones = {
+  modes: need<HTMLElement>('#modes'),
+  rail: need<HTMLElement>('#rail'),
+  spec: need<HTMLElement>('#spec'),
+  zoneY: need<HTMLElement>('#zone-y'),
+  zoneX: need<HTMLElement>('#zone-x'),
 }
 
 const viewport = createViewport(canvas)
@@ -22,14 +27,20 @@ const view: ViewSettings = defaultView()
 function show(spec: CreatureSpec): void {
   const creature = generate(spec)
   viewport.show(creature, spec.body)
-  counter!.textContent = `${creature.triangleCount} tris`
+  reportTotals(zones.spec, {
+    triangles: creature.triangleCount,
+    joints: Object.keys(creature.joints).length,
+    limbs: creature.limbs.length,
+    ident: identOf(spec),
+  })
 }
 
 const spec = defaultSpec()
-mountUi({ modes: zones.modes, mutations: zones.mutations, body: zones.body }, spec, view, {
+mountUi(zones, spec, view, {
   onSpecChange: show,
   onGaitChange: (gait: Gait) => viewport.setGait(gait),
   onViewChange: (next) => viewport.setView(next),
+  onFocus: (lens: Lens | null) => viewport.focus(lens),
 })
 
 viewport.setView(view)

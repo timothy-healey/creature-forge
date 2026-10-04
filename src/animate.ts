@@ -12,6 +12,8 @@ import type { CreatureSpec } from './spec'
  * a cycle always meets itself cleanly at the seam.
  */
 
+const TAU = Math.PI * 2
+
 export const GAITS = ['idle', 'walk'] as const
 export type Gait = (typeof GAITS)[number]
 
@@ -38,6 +40,9 @@ export interface Limb {
   phase: number
 }
 
+/** Phases are angles: two pi is zero, and only one of them reads as a phase. */
+export const wrapPhase = (phase: number) => ((phase % TAU) + TAU) % TAU
+
 /** The ordinary four-limbed arrangement, for callers that have nothing else. */
 export const DEFAULT_LIMBS: readonly Limb[] = [
   { joints: ['backUpperL', 'backLowerL', 'backFootL'], kind: 'leg', phase: 0 },
@@ -56,8 +61,6 @@ export interface JointPose {
 }
 
 export type Pose = Record<string, JointPose>
-
-const TAU = Math.PI * 2
 
 export function poseAt(
   time: number,

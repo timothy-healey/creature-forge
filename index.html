@@ -4,16 +4,29 @@
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <title>Creature Forge</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link
+      rel="stylesheet"
+      href="https://fonts.googleapis.com/css2?family=Saira+Condensed:wght@400;500;600;700&family=Share+Tech+Mono&display=swap"
+    />
   </head>
   <body>
-    <main>
-      <header id="modes"></header>
-      <aside id="mutations"></aside>
-      <div class="stage">
-        <canvas id="viewport"></canvas>
-        <p class="readout"><span id="triangles"></span> · drag to orbit, scroll to zoom</p>
+    <main class="sheet">
+      <div class="frame">
+        <div class="zone zone-y" id="zone-y" aria-hidden="true"></div>
+        <div class="inner">
+          <header class="modes" id="modes"></header>
+          <div class="body">
+            <aside class="rail" id="rail"></aside>
+            <div class="field" id="field">
+              <canvas id="viewport"></canvas>
+            </div>
+            <aside class="spec" id="spec"></aside>
+          </div>
+          <div class="zone zone-x" id="zone-x" aria-hidden="true"></div>
+        </div>
       </div>
-      <aside id="body"></aside>
     </main>
     <script type="module" src="/src/main.ts"></script>
   </body>

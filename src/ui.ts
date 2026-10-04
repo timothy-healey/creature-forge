@@ -1,20 +1,21 @@
 import { GAITS, type Gait } from './animate'
-import { BACKGROUNDS, RENDER_MODES, type Background, type RenderMode, type ViewSettings } from './render'
+import { LENSES, LENS_LABEL, type Lens } from './inspect'
+import { BACKGROUNDS, RENDER_MODES, type ViewSettings } from './render'
 import {
+  BUILDS,
   COLOR_KEYS,
   COLOR_LABELS,
   EAR_TYPES,
-  FRONT_LIMBS,
-  BUILDS,
-  HEAD_TYPES,
   EYE_COUNTS,
+  FRONT_LIMBS,
+  HEAD_TYPES,
   HORN_COUNTS,
   LEG_TYPES,
-  MESH_MODES,
-  PATTERNS,
   LIMB_SEGMENTS,
-  PAIR_COUNTS,
+  MESH_MODES,
   MUTATION_GROUPS,
+  PAIR_COUNTS,
+  PATTERNS,
   RIDGE_TYPES,
   SEGMENT_COUNTS,
   SLIDERS,
@@ -24,28 +25,45 @@ import {
   readSlider,
   writeSlider,
   type CreatureSpec,
+  type SliderPath,
 } from './spec'
 
 /**
- * The controls, split by what they are about rather than piled into one list.
+ * The sheet's controls.
  *
- * Along the top: how you are looking at the creature — the gait, how it is
- * built, how it is drawn, and the two knobs that set the era. Down the left:
- * what it structurally *is*. On the right: its own measurements. Nothing in
- * here is hand-listed that the spec already knows — sliders build themselves
- * from `SLIDERS` and every picker reads its options from the lists in `spec`.
+ * Two rules run through all of it. Nothing is hand-listed that the spec already
+ * knows — every picker reads its options from `spec`, every slider builds itself
+ * from `SLIDERS` — and every control declares which lens it reveals, so touching
+ * it draws the thing it changes and letting go puts the sheet back to quiet.
  */
 
 export interface Zones {
   modes: HTMLElement
-  mutations: HTMLElement
-  body: HTMLElement
+  rail: HTMLElement
+  spec: HTMLElement
+  zoneY: HTMLElement
+  zoneX: HTMLElement
 }
 
 export interface UiHandlers {
   onSpecChange(spec: CreatureSpec): void
   onGaitChange(gait: Gait): void
   onViewChange(view: ViewSettings): void
+  onFocus(lens: Lens | null): void
+}
+
+/** Which part of the machinery each group of controls is about. */
+const REVEALS: Partial<Record<SliderPath, Lens>> = {
+  'detail.level': 'rings',
+  'shape.edge': 'rings',
+  'shape.section': 'rings',
+  'shape.bulk': 'rings',
+  'spine.arch': 'spine',
+  'spine.sway': 'spine',
+  'limbs.back': 'solve',
+  'limbs.front': 'solve',
+  'legs.length': 'solve',
+  'legs.thickness': 'solve',
 }
 
 export function mountUi(zones: Zones, spec: CreatureSpec, view: ViewSettings, handlers: UiHandlers): void {
@@ -55,12 +73,27 @@ export function mountUi(zones: Zones, spec: CreatureSpec, view: ViewSettings, ha
     handlers.onSpecChange(next)
   }
 
+  zones.zoneY.replaceChildren(...['A', 'B', 'C', 'D'].map(text))
+  zones.zoneX.replaceChildren(...['1', '2', '3', '4', '5', '6'].map(text))
   mountModes(zones.modes, spec, view, handlers, changed, remount)
-  mountMutations(zones.mutations, spec, changed)
-  mountBody(zones.body, spec, changed)
+  mountRail(zones.rail, spec, changed, handlers)
+  mountSpec(zones.spec, spec, changed, handlers)
 }
 
-// ─── top: how you are looking at it ─────────────────────────────────────────
+/** The title block's solved totals, rewritten whenever a creature is built. */
+export function reportTotals(
+  zone: HTMLElement,
+  totals: { triangles: number; joints: number; limbs: number; ident: string },
+): void {
+  const block = zone.querySelector('[data-totals]')
+  if (!block) return
+  block.querySelector('[data-tris]')!.textContent = String(totals.triangles)
+  block.querySelector('[data-joints]')!.textContent = String(totals.joints)
+  block.querySelector('[data-limbs]')!.textContent = String(totals.limbs)
+  zone.querySelector('[data-ident]')!.textContent = totals.ident
+}
+
+// ─── the mode strip ─────────────────────────────────────────────────────────
 
 function mountModes(
   panel: HTMLElement,
@@ -70,187 +103,389 @@ function mountModes(
   changed: () => void,
   remount: (spec: CreatureSpec) => void,
 ): void {
+  const lenses = new Set(view.lenses)
+
   panel.replaceChildren(
-    rollButton(() => {
-      // Detail, mesh and mutation are ways of looking at a creature rather than
-      // part of one, so a roll keeps whatever is selected.
-      remount(randomSpec(Math.random, spec.detail.level, spec.body.mesh, spec.body.mutation))
-    }),
-    bar('Gait', pills(GAITS, 'idle', (gait) => handlers.onGaitChange(gait))),
-    bar(
-      'Built',
+    wordmark(),
+    group('GAIT', pills(GAITS, 'idle', (gait) => handlers.onGaitChange(gait), 'phase', handlers)),
+    group(
+      'BUILT',
       pills(MESH_MODES, spec.body.mesh, (mesh) => {
         spec.body.mesh = mesh
         changed()
-      }),
+      }, 'rig', handlers),
     ),
-    bar(
-      'Drawn',
-      pills(RENDER_MODES, view.render, (render: RenderMode) => {
+    group(
+      'DRAWN',
+      pills(RENDER_MODES, view.render, (render) => {
         view.render = render
         handlers.onViewChange(view)
       }),
     ),
-    bar(
-      'Scene',
-      pills(BACKGROUNDS, view.background, (background: Background) => {
+    group(
+      'SCENE',
+      pills(BACKGROUNDS, view.background, (background) => {
         view.background = background
         handlers.onViewChange(view)
       }),
     ),
-    bar('Vertices', dial(spec.detail.level, (value) => {
-      spec.detail.level = value
-      changed()
-    })),
-    bar('Pixels', dial(view.pixels, (value) => {
-      view.pixels = value
-      handlers.onViewChange(view)
-    })),
-    bar('Wobble', dial(view.wobble, (value) => {
-      view.wobble = value
-      handlers.onViewChange(view)
-    })),
+    group(
+      'INSPECT',
+      toggles(LENSES, lenses, (lens, on) => {
+        if (on) lenses.add(lens)
+        else lenses.delete(lens)
+        view.lenses = [...lenses]
+        handlers.onViewChange(view)
+      }),
+    ),
+    span('spacer'),
+    rollButton(() => remount(randomSpec(Math.random, spec.detail.level, spec.body.mesh, spec.body.mutation))),
   )
 }
 
-// ─── left: what it structurally is ──────────────────────────────────────────
+// ─── left rail: what it structurally is ─────────────────────────────────────
 
-function mountMutations(panel: HTMLElement, spec: CreatureSpec, changed: () => void): void {
+function mountRail(panel: HTMLElement, spec: CreatureSpec, changed: () => void, handlers: UiHandlers): void {
   const buttons: HTMLButtonElement[] = []
 
   panel.replaceChildren(
-    ...MUTATION_GROUPS.flatMap((group) => {
-      const heading = document.createElement('h2')
-      heading.textContent = group.title
-
-      const list = document.createElement('div')
-      list.className = 'stack'
-      list.append(
-        ...group.items.map((mutation) => {
-          const button = document.createElement('button')
-          button.type = 'button'
-          button.textContent = mutation
-          button.setAttribute('aria-pressed', String(mutation === spec.body.mutation))
-          button.addEventListener('click', () => {
+    ...MUTATION_GROUPS.flatMap((family, index) => {
+      const pack = el('div', 'pack two')
+      pack.append(
+        ...family.items.map((mutation) => {
+          const button = choiceButton(String(mutation), mutation === spec.body.mutation, () => {
             for (const other of buttons) other.setAttribute('aria-pressed', 'false')
             button.setAttribute('aria-pressed', 'true')
             spec.body.mutation = mutation
             changed()
-          })
+          }, 'rig', handlers)
           buttons.push(button)
           return button
         }),
       )
-
-      return [heading, list]
+      return [tab(`A${index + 1}  ${family.title.toUpperCase()}`, String(family.items.length)), pack]
     }),
+    el('div', 'grow'),
+    tab('LEGEND', ''),
+    legend(),
   )
 }
 
-// ─── right: its own measurements ────────────────────────────────────────────
+function legend(): HTMLElement {
+  const box = el('div', 'legend')
+  box.innerHTML =
+    '<div><span class="swatch" style="background:var(--solved)"></span> <b style="color:var(--solved)">solved</b> <span style="color:var(--faint)">by the system</span></div>' +
+    '<div><span class="chip" style="background:var(--chosen)"></span> <b style="color:var(--chosen)">chosen</b> <span style="color:var(--faint)">by you</span></div>' +
+    '<div><span class="swatch" style="background:var(--datum)"></span> <b style="color:var(--datum)">datum</b> <span style="color:var(--faint)">&amp; grid</span></div>'
+  return box
+}
 
-function mountBody(panel: HTMLElement, spec: CreatureSpec, changed: () => void): void {
+// ─── right rail: its own measurements ───────────────────────────────────────
+
+function mountSpec(panel: HTMLElement, spec: CreatureSpec, changed: () => void, handlers: UiHandlers): void {
   panel.replaceChildren(
-    section('Shape', slidersFor('Shape', spec, changed)),
-    section('Markings', [
-      choice('Pattern', PATTERNS, spec.skin.pattern, (pattern) => {
-        spec.skin.pattern = pattern
-        changed()
-      }),
-      ...slidersFor('Markings', spec, changed),
-    ]),
-    section('Frame', [
-      choice('Build', BUILDS, spec.body.build, (build) => {
+    tab('B1  SHAPE', ''),
+    lines(['detail.level', 'shape.edge', 'shape.section', 'shape.bulk'], spec, changed, handlers),
+    tab('B2  SPINE', ''),
+    lines(['spine.arch', 'spine.sway'], spec, changed, handlers),
+    tab('B3  FRAME', ''),
+    packed('four', [
+      choices(BUILDS, spec.body.build, (build) => {
         spec.body.build = build
         changed()
-      }),
-      choice('Front', FRONT_LIMBS, spec.body.frontLimb, (frontLimb) => {
-        spec.body.frontLimb = frontLimb
-        changed()
-      }),
-      choice('Segments', SEGMENT_COUNTS, spec.torso.segments, (segments) => {
+      }, 'spine', handlers),
+      choices(SEGMENT_COUNTS, spec.torso.segments, (segments) => {
         spec.torso.segments = segments
         changed()
-      }),
+      }, 'spine', handlers),
     ]),
-    section('Head', [
-      choice('Shape', HEAD_TYPES, spec.head.type, (type) => {
+    lines(['torso.height', 'torso.width', 'torso.depth', 'neck.length'], spec, changed, handlers),
+    tab('B4  LIMBS', ''),
+    packed('four', [
+      choices(PAIR_COUNTS, spec.limbs.pairs, (pairs) => {
+        spec.limbs.pairs = pairs
+        changed()
+      }, 'solve', handlers),
+      choices(LIMB_SEGMENTS, spec.limbs.segments, (segments) => {
+        spec.limbs.segments = segments
+        changed()
+      }, 'solve', handlers),
+      choices(FRONT_LIMBS, spec.body.frontLimb, (frontLimb) => {
+        spec.body.frontLimb = frontLimb
+        changed()
+      }, 'solve', handlers),
+      choices(LEG_TYPES, spec.legs.type, (type) => {
+        spec.legs.type = type
+        changed()
+      }, 'solve', handlers),
+    ]),
+    lines(['limbs.back', 'limbs.front', 'legs.length', 'legs.thickness', 'arms.length', 'arms.thickness'], spec, changed, handlers),
+    tab('B5  HEAD', ''),
+    packed('five', [
+      choices(HEAD_TYPES, spec.head.type, (type) => {
         spec.head.type = type
         changed()
       }),
-      choice('Horns', HORN_COUNTS, spec.head.horns, (horns) => {
+      choices(HORN_COUNTS, spec.head.horns, (horns) => {
         spec.head.horns = horns
         changed()
       }),
-      choice('Eyes', EYE_COUNTS, spec.head.eyes, (eyes) => {
+      choices(EYE_COUNTS, spec.head.eyes, (eyes) => {
         spec.head.eyes = eyes
         changed()
       }),
-      choice('Ears', EAR_TYPES, spec.head.ears, (ears) => {
+      choices(EAR_TYPES, spec.head.ears, (ears) => {
         spec.head.ears = ears
         changed()
       }),
-      ...slidersFor('Head', spec, changed),
     ]),
-    section('Spine', slidersFor('Spine', spec, changed)),
-    section('Neck', slidersFor('Neck', spec, changed)),
-    section('Torso', slidersFor('Torso', spec, changed)),
-    section('Arms', slidersFor('Arms', spec, changed)),
-    section('Limbs', [
-      choice('Pairs', PAIR_COUNTS, spec.limbs.pairs, (pairs) => {
-        spec.limbs.pairs = pairs
-        changed()
-      }),
-      choice('Bones', LIMB_SEGMENTS, spec.limbs.segments, (segments) => {
-        spec.limbs.segments = segments
-        changed()
-      }),
-      ...slidersFor('Limbs', spec, changed),
-    ]),
-    section('Legs', [
-      choice('Stance', LEG_TYPES, spec.legs.type, (type) => {
-        spec.legs.type = type
-        changed()
-      }),
-      ...slidersFor('Legs', spec, changed),
-    ]),
-    section('Tail', [
-      choice('Shape', TAIL_TYPES, spec.tail.type, (type) => {
+    lines(['head.length', 'head.width'], spec, changed, handlers),
+    tab('B6  TAIL & BACK', ''),
+    packed('four', [
+      choices(TAIL_TYPES, spec.tail.type, (type) => {
         spec.tail.type = type
         changed()
       }),
-    ]),
-    section('Back', [
-      choice('Ridge', RIDGE_TYPES, spec.back.ridge, (ridge) => {
+      choices(RIDGE_TYPES, spec.back.ridge, (ridge) => {
         spec.back.ridge = ridge
         changed()
       }),
-      choice('Wings', WING_TYPES, spec.wings.type, (type) => {
+      choices(WING_TYPES, spec.wings.type, (type) => {
         spec.wings.type = type
         changed()
       }),
     ]),
-    section(
-      'Palette',
-      COLOR_KEYS.map((key) =>
-        colorRow(COLOR_LABELS[key], spec.colors[key], (value) => {
-          spec.colors[key] = value
-          changed()
-        }),
-      ),
-    ),
+    tab('B7  MARKINGS', ''),
+    packed('four', [
+      choices(PATTERNS, spec.skin.pattern, (pattern) => {
+        spec.skin.pattern = pattern
+        changed()
+      }),
+    ]),
+    lines(['skin.scale', 'skin.strength'], spec, changed, handlers),
+    tab('B8  PALETTE', ''),
+    palette(spec, changed),
+    el('div', 'grow'),
+    totalsBlock(),
+    identBlock(),
   )
+}
+
+function palette(spec: CreatureSpec, changed: () => void): HTMLElement {
+  const row = el('div', 'swatches')
+  for (const key of COLOR_KEYS) {
+    const label = document.createElement('label')
+    const name = document.createElement('span')
+    name.textContent = COLOR_LABELS[key]
+    const input = document.createElement('input')
+    input.type = 'color'
+    input.value = spec.colors[key]
+    input.addEventListener('input', () => {
+      spec.colors[key] = input.value
+      changed()
+    })
+    label.append(name, input)
+    row.append(label)
+  }
+  return row
+}
+
+function totalsBlock(): HTMLElement {
+  const block = el('dl', 'block')
+  block.setAttribute('data-totals', '')
+  block.innerHTML =
+    '<div><dt>TRIS</dt><dd data-tris>&mdash;</dd></div>' +
+    '<div><dt>JOINTS</dt><dd data-joints>&mdash;</dd></div>' +
+    '<div><dt>LIMBS</dt><dd data-limbs>&mdash;</dd></div>'
+  return block
+}
+
+function identBlock(): HTMLElement {
+  const block = el('dl', 'ident')
+  block.innerHTML = '<dt>IDENT</dt><dd data-ident>&mdash;</dd>'
+  return block
 }
 
 // ─── pieces ─────────────────────────────────────────────────────────────────
 
-function slidersFor(group: string, spec: CreatureSpec, changed: () => void): HTMLElement[] {
-  return SLIDERS.filter((slider) => slider.group === group).map((slider) =>
-    sliderRow(slider.label, readSlider(spec, slider.path), (value) => {
-      writeSlider(spec, slider.path, value)
+function el(tag: string, className = ''): HTMLElement {
+  const node = document.createElement(tag)
+  if (className) node.className = className
+  return node
+}
+
+function span(className: string): HTMLElement {
+  return el('span', className)
+}
+
+function text(value: string): HTMLElement {
+  const node = el('span')
+  node.textContent = value
+  return node
+}
+
+function wordmark(): HTMLElement {
+  const box = el('div', 'wordmark')
+  const name = document.createElement('b')
+  name.textContent = 'Creature Forge'
+  const sub = el('span')
+  sub.style.cssText = 'font-family:var(--figure);font-size:9px;color:var(--faint)'
+  sub.textContent = 'SHT 01'
+  box.append(name, sub)
+  return box
+}
+
+function group(label: string, content: HTMLElement): HTMLElement {
+  const box = el('div', 'group')
+  box.append(text(label), content)
+  return box
+}
+
+function tab(left: string, right: string): HTMLElement {
+  const box = el('div', 'tab')
+  box.append(text(left), text(right))
+  return box
+}
+
+function packed(columns: string, rows: HTMLElement[]): HTMLElement {
+  const wrap = el('div')
+  for (const row of rows) {
+    row.className = `pack ${columns}`
+    wrap.append(row)
+  }
+  return wrap
+}
+
+function lines(
+  paths: readonly SliderPath[],
+  spec: CreatureSpec,
+  changed: () => void,
+  handlers: UiHandlers,
+): HTMLElement {
+  const pack = el('div', 'pack lines')
+  for (const path of paths) {
+    const def = SLIDERS.find((slider) => slider.path === path)
+    if (!def) continue
+
+    const row = document.createElement('label')
+    row.className = 'line'
+    const name = el('span')
+    name.textContent = def.label
+
+    const input = document.createElement('input')
+    input.type = 'range'
+    input.min = '0'
+    input.max = '1'
+    input.step = '0.01'
+    input.value = String(readSlider(spec, path))
+
+    const readout = document.createElement('em')
+    readout.textContent = readSlider(spec, path).toFixed(2)
+
+    const lens = REVEALS[path] ?? null
+    input.addEventListener('input', () => {
+      writeSlider(spec, path, Number(input.value))
+      readout.textContent = Number(input.value).toFixed(2)
       changed()
-    }),
+    })
+    reveal(input, lens, handlers)
+
+    row.append(name, input, readout)
+    pack.append(row)
+  }
+  return pack
+}
+
+/**
+ * Draw what this control changes while it is being touched, and stop when it is
+ * let go — by pointer or by keyboard, so the sheet annotates itself either way.
+ */
+function reveal(node: HTMLElement, lens: Lens | null, handlers: UiHandlers): void {
+  if (!lens) return
+  const on = () => handlers.onFocus(lens)
+  const off = () => handlers.onFocus(null)
+  node.addEventListener('pointerenter', on)
+  node.addEventListener('pointerleave', off)
+  node.addEventListener('focus', on)
+  node.addEventListener('blur', off)
+}
+
+function choiceButton(
+  label: string,
+  selected: boolean,
+  onPick: () => void,
+  lens: Lens | null = null,
+  handlers?: UiHandlers,
+): HTMLButtonElement {
+  const button = document.createElement('button')
+  button.type = 'button'
+  button.textContent = label
+  button.setAttribute('aria-pressed', String(selected))
+  button.addEventListener('click', onPick)
+  if (lens && handlers) reveal(button, lens, handlers)
+  return button
+}
+
+function choices<T extends string | number>(
+  options: readonly T[],
+  selected: T,
+  onPick: (value: T) => void,
+  lens: Lens | null = null,
+  handlers?: UiHandlers,
+): HTMLElement {
+  const row = el('div')
+  const buttons = options.map((option) => {
+    const button = choiceButton(String(option), option === selected, () => {
+      for (const other of buttons) other.setAttribute('aria-pressed', 'false')
+      button.setAttribute('aria-pressed', 'true')
+      onPick(option)
+    }, lens, handlers)
+    return button
+  })
+  row.append(...buttons)
+  return row
+}
+
+function pills<T extends string | number>(
+  options: readonly T[],
+  selected: T,
+  onPick: (value: T) => void,
+  lens: Lens | null = null,
+  handlers?: UiHandlers,
+): HTMLElement {
+  const row = el('div')
+  row.style.cssText = 'display:flex;gap:3px'
+  const buttons = options.map((option) =>
+    choiceButton(String(option), option === selected, () => {
+      for (const other of buttons) other.setAttribute('aria-pressed', 'false')
+      buttons[options.indexOf(option)]!.setAttribute('aria-pressed', 'true')
+      onPick(option)
+    }, lens, handlers),
   )
+  row.append(...buttons)
+  return row
+}
+
+function toggles<T extends string>(
+  options: readonly T[],
+  active: Set<T>,
+  onToggle: (value: T, on: boolean) => void,
+): HTMLElement {
+  const row = el('div')
+  row.style.cssText = 'display:flex;gap:3px'
+  for (const option of options) {
+    const button = document.createElement('button')
+    button.type = 'button'
+    button.textContent = LENS_LABEL[option as Lens] ?? option
+    button.setAttribute('aria-pressed', String(active.has(option)))
+    button.addEventListener('click', () => {
+      const on = button.getAttribute('aria-pressed') !== 'true'
+      button.setAttribute('aria-pressed', String(on))
+      onToggle(option, on)
+    })
+    row.append(button)
+  }
+  return row
 }
 
 function rollButton(onRoll: () => void): HTMLElement {
@@ -260,103 +495,4 @@ function rollButton(onRoll: () => void): HTMLElement {
   button.textContent = 'Randomise'
   button.addEventListener('click', onRoll)
   return button
-}
-
-/** One labelled cell of the top bar. */
-function bar(label: string, content: HTMLElement): HTMLElement {
-  const cell = document.createElement('div')
-  cell.className = 'cell'
-
-  const name = document.createElement('span')
-  name.textContent = label
-
-  cell.append(name, content)
-  return cell
-}
-
-function section(title: string, children: HTMLElement[]): HTMLElement {
-  const element = document.createElement('section')
-  const heading = document.createElement('h2')
-  heading.textContent = title
-  element.append(heading, ...children)
-  return element
-}
-
-function dial(value: number, onInput: (value: number) => void): HTMLElement {
-  const input = document.createElement('input')
-  input.type = 'range'
-  input.min = '0'
-  input.max = '1'
-  input.step = '0.01'
-  input.value = String(value)
-  input.addEventListener('input', () => onInput(Number(input.value)))
-  return input
-}
-
-function sliderRow(label: string, value: number, onInput: (value: number) => void): HTMLElement {
-  const row = document.createElement('label')
-  row.className = 'row'
-
-  const name = document.createElement('span')
-  name.textContent = label
-
-  row.append(name, dial(value, onInput))
-  return row
-}
-
-function colorRow(label: string, value: string, onInput: (value: string) => void): HTMLElement {
-  const row = document.createElement('label')
-  row.className = 'row'
-
-  const name = document.createElement('span')
-  name.textContent = label
-
-  const input = document.createElement('input')
-  input.type = 'color'
-  input.value = value
-  input.addEventListener('input', () => onInput(input.value))
-
-  row.append(name, input)
-  return row
-}
-
-function pills<T extends string | number>(
-  options: readonly T[],
-  selected: T,
-  onPick: (value: T) => void,
-): HTMLElement {
-  const group = document.createElement('div')
-  group.className = 'choices'
-
-  const buttons = options.map((option) => {
-    const button = document.createElement('button')
-    button.type = 'button'
-    button.textContent = String(option)
-    button.setAttribute('aria-pressed', String(option === selected))
-    button.addEventListener('click', () => {
-      for (const other of buttons) other.setAttribute('aria-pressed', 'false')
-      button.setAttribute('aria-pressed', 'true')
-      onPick(option)
-    })
-    return button
-  })
-
-  group.append(...buttons)
-  return group
-}
-
-function choice<T extends string | number>(
-  label: string,
-  options: readonly T[],
-  selected: T,
-  onPick: (value: T) => void,
-): HTMLElement {
-  const row = document.createElement('div')
-  row.className = options.length > 4 ? 'row wide' : 'row'
-
-  const name = document.createElement('span')
-  name.textContent = label
-
-  row.append(name, pills(options, selected, onPick))
-  return row
 }

@@ -2,6 +2,7 @@ import * as THREE from 'three'
 import { OrbitControls } from 'three/examples/jsm/controls/OrbitControls.js'
 import { applyPose, poseAt, type Gait, type Stance } from './animate'
 import type { Creature } from './generate'
+import { createInspector, type Lens } from './inspect'
 
 /**
  * The viewport, and the four things that make it look like 1998.
@@ -100,6 +101,8 @@ export const SCENERY: Record<Background, Scenery> = {
 export interface ViewSettings {
   render: RenderMode
   background: Background
+  /** Which parts of the machinery are drawn over the creature. */
+  lenses: Lens[]
   /** 0 is a handful of pixels tall, 1 is a modern crisp image. */
   pixels: number
   /** 0 is violently unstable, 1 is rock steady. */
@@ -107,7 +110,7 @@ export interface ViewSettings {
 }
 
 export function defaultView(): ViewSettings {
-  return { render: 'lit', background: 'void', pixels: 0.42, wobble: 0.3 }
+  return { render: 'lit', background: 'void', lenses: [], pixels: 0.42, wobble: 0.3 }
 }
 
 const snapGrid = new THREE.Vector2(160, 120)
@@ -162,10 +165,15 @@ export interface Viewport {
   show(creature: Creature, stance: Stance): void
   setGait(gait: Gait): void
   setView(view: ViewSettings): void
+  /** Draw one lens for as long as a control is being touched, then let go. */
+  focus(lens: Lens | null): void
   dispose(): void
 }
 
 export function createViewport(canvas: HTMLCanvasElement): Viewport {
+  const inspector = createInspector()
+  canvas.parentElement?.appendChild(inspector.element)
+
   const renderer = new THREE.WebGLRenderer({ canvas, antialias: false, powerPreference: 'low-power' })
   renderer.setPixelRatio(1)
 
@@ -287,6 +295,7 @@ export function createViewport(canvas: HTMLCanvasElement): Viewport {
     }
     creature = next
     scene.add(next.root)
+    inspector.show(next)
     dress(true)
 
     const bounds = new THREE.Box3().setFromObject(next.root)
@@ -322,6 +331,7 @@ export function createViewport(canvas: HTMLCanvasElement): Viewport {
       )
     }
     renderer.render(scene, camera)
+    inspector.draw(camera, canvas.clientWidth, canvas.clientHeight, clock.getElapsedTime())
   }
 
   requestAnimationFrame(frame)
@@ -338,10 +348,13 @@ export function createViewport(canvas: HTMLCanvasElement): Viewport {
       const gridSize = 40 * 100 ** Math.min(1, Math.max(0, next.wobble))
       snapGrid.set(gridSize, gridSize * 0.75)
       setScenery(next.background)
+      inspector.setLenses(new Set(next.lenses))
       dress()
     },
+    focus: (lens) => inspector.focus(lens),
     dispose() {
       running = false
+      inspector.element.remove()
       controls.dispose()
       grid?.dispose()
       sky?.geometry.dispose()

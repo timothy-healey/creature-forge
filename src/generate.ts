@@ -2,7 +2,7 @@ import * as THREE from 'three'
 import { mirrorX, resolutionFor } from './geometry'
 import { type RestMap, type RestPose, rest } from './joints'
 import * as parts from './parts'
-import type { Limb } from './animate'
+import { wrapPhase, type Limb } from './animate'
 import { paint } from './pattern'
 import { DEFORMATIONS, deform, explode, skew, type DeformPart, type Deformation } from './mutate'
 import { buildSkin, type SkinPiece } from './skin'
@@ -391,7 +391,7 @@ export function generate(input: CreatureSpec): Creature {
       limbs.push({
         joints: names,
         kind: options.ending === 'hand' ? 'arm' : 'leg',
-        phase: options.phase ?? 0,
+        phase: wrapPhase(options.phase ?? 0),
       })
     }
 

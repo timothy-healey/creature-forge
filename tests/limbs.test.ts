@@ -236,3 +236,23 @@ describe('the gait, handed a creature nobody wrote it for', () => {
     expect(Math.abs(left.phase - right.phase)).toBeCloseTo(Math.PI, 5)
   })
 })
+
+describe('a limb’s phase', () => {
+  test('is an angle in [0, 2π), never a bare sum that reads as nonsense', () => {
+    for (const spec of [walker(), walker((s) => void (s.limbs.pairs = 4)), randomSpec()]) {
+      for (const limb of generate(spec).limbs) {
+        expect(limb.phase, limb.joints[0]).toBeGreaterThanOrEqual(0)
+        expect(limb.phase, limb.joints[0]).toBeLessThan(Math.PI * 2)
+      }
+    }
+  })
+
+  test('still opposes the two sides of a pair after wrapping', () => {
+    const limbs = generate(walker()).limbs
+    const left = limbs.find((limb) => limb.joints[0] === 'frontUpperL')!
+    const right = limbs.find((limb) => limb.joints[0] === 'frontUpperR')!
+    const apart = Math.abs(left.phase - right.phase)
+
+    expect(Math.min(apart, Math.PI * 2 - apart)).toBeCloseTo(Math.PI, 5)
+  })
+})

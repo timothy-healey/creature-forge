@@ -397,3 +397,22 @@ function hslToHex(hue: number, saturation: number, lightness: number): string {
 }
 
 export { PATTERNS, type Pattern }
+
+/**
+ * A short stable name for a creature, derived from the whole spec.
+ *
+ * Two creatures that look the same get the same ident and a single changed
+ * slider gets a different one, so it is a real identity rather than a decorative
+ * code — and it is what a share link will carry when there is one.
+ */
+export function identOf(spec: CreatureSpec): string {
+  const text = JSON.stringify(clampSpec(spec))
+  let a = 0x811c9dc5
+  let b = 0x01000193
+  for (let i = 0; i < text.length; i++) {
+    a = Math.imul(a ^ text.charCodeAt(i), 0x01000193)
+    b = Math.imul(b + text.charCodeAt(i), 0x85ebca6b) ^ (b >>> 13)
+  }
+  const block = (value: number) => (value >>> 0).toString(36).toUpperCase().padStart(7, '0').slice(-4)
+  return `${block(a)}-${block(b)}-${block(a ^ b)}`
+}
