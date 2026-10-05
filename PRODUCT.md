@@ -8,14 +8,23 @@ web
 
 ## Users
 
-**Primary: a technical visitor, opening a link cold.** An engineer or hiring
-manager with a couple of minutes. They did not come to make a creature; they
-came to see whether the thing is any good. They may be on a phone. The first few
-seconds decide whether they stay.
+**Primary: someone who wants a creature and does not want to model one.** A
+developer prototyping, a game-jam team that needs twenty enemies by Sunday,
+somebody building a toy. They arrive with a use in mind and want to leave with a
+file or a link. They care that rolling is fast, that the rolls are varied enough
+to be worth rolling, and that the result can go somewhere else.
 
-**Secondary: the author, making creatures to use elsewhere.** Wants a creature
-to leave the app — into a game engine, Blender, a screenshot — rather than only
-existing in a browser tab.
+**Secondary: someone who came to play.** Spore's actual audience — people for
+whom the making is the point and the export is optional. They roll, nudge, roll
+again, and send the good ones to a friend.
+
+**Third: someone who wants to know how it is done.** Procedural geometry,
+skinning, a gait system that is never told what body it is driving. The inspect
+layer is written for them.
+
+Any of them may arrive cold, from a link, with no account and no introduction,
+on any device. Nobody is briefed, so the first screen has to do the briefing —
+which is the constraint that shapes the opening view, whoever is behind it.
 
 ## Product Purpose
 
@@ -25,9 +34,9 @@ Every creature is built from a plain spec by code: geometry sampled from
 continuous profiles, a spine chain, limbs solved against the floor, and gaits
 that drive a creature nobody designed.
 
-Success is a technical visitor coming away understanding one idea they did not
-arrive with — how you animate a morphology nobody wrote the animation for — and
-the author being able to get a creature out of the app and into something else.
+Success is leaving with a creature you would not have modelled yourself — and,
+for anyone who opens the inspect layer, coming away with one idea they did not
+arrive with: how you animate a morphology nobody wrote the animation for.
 
 ## Positioning
 
@@ -50,14 +59,14 @@ and saving can work without a backend.
 
 ## Capabilities and Constraints
 
-**Stack.** Vite + TypeScript + Three.js. No UI framework. Vitest, 317 tests.
+**Stack.** Vite + TypeScript + Three.js. No UI framework. Vitest, 393 tests.
 Everything is generated at runtime from a spec; there are no authored assets,
 no model files and no textures.
 
 **Today.** A creature spec drives: a bendable spine chain; one to four limb
 pairs placed anywhere along it with two to five bones each; head, face, eyes,
-ears, horns, tail, ridge and wings, each able to be absent; three shape genes;
-a detail slider that slides the same silhouette between roughly 250 and 3000
+ears, horns, tail, ridge and wings, each able to be absent; two shape genes;
+a detail slider that slides the same silhouette between 288 and 4,012
 triangles; six procedural marking patterns; twelve structural mutations;
 jointed and skinned mesh modes; four render modes; four backgrounds; two gaits.
 Every one of those values, and the view it is being looked at under, packs into
@@ -79,7 +88,7 @@ assets.
 
 ## Evidence on Hand
 
-The working application and its 317 tests. Measurements taken during
+The working application and its 393 tests. Measurements taken during
 development and reproducible from the repo: triangle counts per mutation and
 detail level, build times per creature, skin-weight distributions, eye-occlusion
 sweeps.

@@ -1,7 +1,7 @@
 # Surface: the app
 
 The single surface. Mode: **Operate** — the visitor completes a task (make a
-creature, understand how it was made). Development-only; not shipped.
+creature, understand how it was made). Shipped: this is the whole product.
 
 ## Direction contract
 
@@ -20,9 +20,10 @@ labels, Share Tech Mono for every number. Three accents with jobs, never
 decoration: **amber `#f2b134`** is what the system solved, **vermilion
 `#e2503a`** is what you chose, **cyan `#4e93ad`** is datum and grid.
 
-**STORY.** A technical visitor arrives, sees a creature walking inside a drawing
-sheet, drags one slider, and watches a dimension somewhere else redraw because
-the generator re-solved it. They understand that nothing here was authored.
+**STORY.** Someone arrives with no introduction, sees a creature walking inside
+a drawing sheet, drags one slider, and watches a dimension somewhere else redraw
+because the generator re-solved it. They understand that nothing here was
+authored.
 
 **FIRST VIEWPORT.** Full-bleed sheet, 14px margin, single hairline frame. Mode
 strip across the top ending in the vermilion RANDOMISE block, the only filled
