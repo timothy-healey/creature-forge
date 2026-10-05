@@ -292,9 +292,21 @@ function mountSpec(panel: HTMLElement, spec: CreatureSpec, changed: () => void, 
     tab('B6  PALETTE', ''),
     palette(spec, changed),
     el('div', 'grow'),
-    totalsBlock(),
-    identBlock(),
+    titleBlock(),
   )
+}
+
+/**
+ * The solved totals and the drawing number, held to the foot of the sheet.
+ *
+ * A title block that scrolls away is not a title block. When the rail runs out
+ * of compression and starts to scroll, this stays put — which is also what
+ * keeps the copy control reachable on a short window.
+ */
+function titleBlock(): HTMLElement {
+  const block = el('div', 'title-block')
+  block.append(totalsBlock(), identBlock())
+  return block
 }
 
 function palette(spec: CreatureSpec, changed: () => void): HTMLElement {
@@ -343,17 +355,53 @@ function copyButton(): HTMLElement {
   button.type = 'button'
   button.className = 'copy'
   button.textContent = 'Copy link'
-  button.addEventListener('click', async () => {
-    try {
-      await navigator.clipboard.writeText(window.location.href)
-      button.textContent = 'Copied'
-    } catch {
-      // A denied clipboard is not a failure worth a dialog: say what to do instead.
-      button.textContent = 'Copy from the address bar'
-    }
-    window.setTimeout(() => void (button.textContent = 'Copy link'), 1600)
+  // The label is the only feedback there is, so it has to reach a screen reader.
+  button.setAttribute('aria-live', 'polite')
+  button.addEventListener('click', () => {
+    void copyText(window.location.href).then((copied) => {
+      button.textContent = copied ? 'Copied' : 'Use the URL bar'
+      window.setTimeout(() => void (button.textContent = 'Copy link'), 1600)
+    })
   })
   return button
+}
+
+/**
+ * Puts text on the clipboard by whichever route the origin allows.
+ *
+ * `navigator.clipboard` exists only in a secure context, and the dev server
+ * offers the same app on localhost and on a bare LAN address — of which only
+ * the first is one. Selecting a carrier element and asking the document to copy
+ * carries no such condition, so it is a live fallback rather than the dead
+ * legacy branch it looks like.
+ */
+async function copyText(text: string): Promise<boolean> {
+  if (navigator.clipboard) {
+    try {
+      await navigator.clipboard.writeText(text)
+      return true
+    } catch {
+      // A refusal is not the end of the options.
+    }
+  }
+
+  const carrier = document.createElement('textarea')
+  carrier.value = text
+  carrier.readOnly = true
+  // Moved off the page rather than hidden: nothing undisplayed can be selected.
+  carrier.style.cssText = 'position:fixed;top:-100vh;left:-100vw;opacity:0'
+  document.body.append(carrier)
+  carrier.select()
+  // Selecting the range as well as the field is what makes this work on iOS.
+  carrier.setSelectionRange(0, text.length)
+
+  try {
+    return document.execCommand('copy')
+  } catch {
+    return false
+  } finally {
+    carrier.remove()
+  }
 }
 
 // ─── pieces ─────────────────────────────────────────────────────────────────

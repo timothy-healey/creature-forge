@@ -115,12 +115,24 @@ body {
 
 /* ─── the mode strip ─────────────────────────────────────────────────────── */
 
+/*
+ * The strip wraps rather than overflowing.
+ *
+ * Nothing in it can compress — a pill is as wide as its word — so on a window
+ * narrower than the strip's own content it used to push the sheet wider than
+ * the viewport, and `overflow: hidden` on the body left no way to reach the
+ * right rail's edge. Wrapping costs a row of height and keeps every control on
+ * the screen, which is the same bargain the density levels make.
+ */
 .modes {
   display: flex;
+  flex-wrap: wrap;
   align-items: stretch;
   border-bottom: 1px solid var(--rule-strong);
   min-height: 34px;
 }
+
+.modes > * { min-height: 34px; }
 
 .wordmark {
   display: flex;
@@ -333,6 +345,13 @@ input[type="color"] {
 .legend .swatch { display: inline-block; width: 13px; height: 2px; vertical-align: 3px; }
 .legend .chip { display: inline-block; width: 8px; height: 8px; }
 
+.title-block {
+  position: sticky;
+  bottom: 0;
+  /* Opaque, or the rail's own content scrolls through it. */
+  background: var(--film);
+}
+
 .block {
   border-top: 1px solid var(--rule-strong);
   display: flex;
@@ -397,6 +416,5 @@ input[type="color"] {
   .body { grid-template-columns: minmax(0, 1fr); }
   .field { height: 58vh; }
   .rail, .spec { border: 0; border-top: 1px solid var(--rule-strong); overflow: visible; }
-  .modes { flex-wrap: wrap; }
   .pack.two { grid-template-columns: repeat(4, minmax(0, 1fr)); }
 }
