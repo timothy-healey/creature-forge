@@ -1,6 +1,7 @@
 import * as THREE from 'three'
 import { OrbitControls } from 'three/examples/jsm/controls/OrbitControls.js'
 import { applyPose, poseAt, type Gait, type Stance } from './animate'
+import { withSmoothNormals } from './geometry'
 import type { Creature } from './generate'
 import { createInspector, type Lens } from './inspect'
 
@@ -101,6 +102,11 @@ export const SCENERY: Record<Background, Scenery> = {
 export interface ViewSettings {
   render: RenderMode
   background: Background
+  /**
+   * A dark edge around every part. Without textures and at a couple of hundred
+   * pixels, this is what separates a limb from the body behind it.
+   */
+  outline: number
   /** Which parts of the machinery are drawn over the creature. */
   lenses: Lens[]
   /** 0 is a handful of pixels tall, 1 is a modern crisp image. */
@@ -110,7 +116,7 @@ export interface ViewSettings {
 }
 
 export function defaultView(): ViewSettings {
-  return { render: 'lit', background: 'void', lenses: [], pixels: 0.42, wobble: 0.3 }
+  return { render: 'lit', background: 'void', lenses: [], outline: 0.45, pixels: 0.52, wobble: 0.3 }
 }
 
 const snapGrid = new THREE.Vector2(160, 120)
@@ -131,6 +137,34 @@ export function frameDistance(radius: number, fov: number, aspect: number, margi
   const horizontal = 2 * Math.atan(Math.tan(vertical / 2) * shape)
   const limiting = Math.min(vertical, horizontal)
   return (span * margin) / Math.max(0.0001, Math.sin(limiting / 2))
+}
+
+/**
+ * How far back a box has to sit to fill the frame without leaving it.
+ *
+ * Fitting the bounding sphere instead is much simpler and much worse: a
+ * sphere's radius comes from the box's diagonal, so a tall thin creature gets
+ * framed as though it were as deep as it is tall and spends most of the frame
+ * on empty air.
+ */
+export function frameBoxDistance(
+  size: THREE.Vector3,
+  basis: { right: THREE.Vector3; up: THREE.Vector3; forward: THREE.Vector3 },
+  fov: number,
+  aspect: number,
+  margin = 1.08,
+): number {
+  const shape = Number.isFinite(aspect) && aspect > 0 ? aspect : 1
+  const half = size.clone().multiplyScalar(0.5)
+  const along = (axis: THREE.Vector3) =>
+    Math.abs(half.x * axis.x) + Math.abs(half.y * axis.y) + Math.abs(half.z * axis.z)
+
+  const vertical = (fov * Math.PI) / 180
+  const verticalTan = Math.tan(vertical / 2)
+  const horizontalTan = verticalTan * shape
+
+  const needed = Math.max(along(basis.up) / verticalTan, along(basis.right) / horizontalTan)
+  return needed * margin + along(basis.forward)
 }
 
 /**
@@ -232,12 +266,14 @@ export function createViewport(canvas: HTMLCanvasElement): Viewport {
   controls.maxPolarAngle = Math.PI * 0.52
   controls.target.set(0, 0.8, 0)
 
-  const ambient = new THREE.AmbientLight(0xffffff, 1.5)
+  // Ambient carries no form at all, so it stays low: enough to keep a facet
+  // turned away from the key from going black, and no more.
+  const ambient = new THREE.AmbientLight(0xffffff, 0.5)
   scene.add(ambient)
-  const key = new THREE.DirectionalLight(0xfff0dd, 2.2)
+  const key = new THREE.DirectionalLight(0xfff0dd, 2.9)
   key.position.set(2.5, 4, 3)
   scene.add(key)
-  const rim = new THREE.DirectionalLight(0x6f7bd0, 1.1)
+  const rim = new THREE.DirectionalLight(0x6f7bd0, 1.0)
   rim.position.set(-3, 2, -2.5)
   scene.add(rim)
 
@@ -246,6 +282,7 @@ export function createViewport(canvas: HTMLCanvasElement): Viewport {
   let standing: Background | null = null
   // Once someone orbits, the angle is theirs; until then it is the house view.
   let orbited = false
+  let shownOutline = -1
 
   /** Rebuilds the place the creature is standing in. */
   function setScenery(kind: Background): void {
@@ -286,9 +323,9 @@ export function createViewport(canvas: HTMLCanvasElement): Viewport {
 
     key.color.set(place.key)
     rim.color.set(place.fill)
-    ambient.intensity = 1.5 * place.brightness
-    key.intensity = 2.2 * place.brightness
-    rim.intensity = 1.1 * place.brightness
+    ambient.intensity = 0.5 * place.brightness
+    key.intensity = 2.9 * place.brightness
+    rim.intensity = 1.0 * place.brightness
   }
 
   const groundGeometry = new THREE.PlaneGeometry(26, 26)
@@ -302,6 +339,7 @@ export function createViewport(canvas: HTMLCanvasElement): Viewport {
   let gait: Gait = 'idle'
   let view = defaultView()
   let skinMaterial: THREE.Material | null = null
+  let outlines: THREE.Object3D[] = []
   const wardrobe = createWardrobe()
   let running = true
   const clock = new THREE.Clock()
@@ -326,9 +364,53 @@ export function createViewport(canvas: HTMLCanvasElement): Viewport {
 
     skinMaterial?.dispose()
     skinMaterial = next
+    drawOutlines()
     wardrobe.wore(view.render, flat)
     // A see-through or blacked-out creature reads better off the floor.
     ground.visible = SCENERY[view.background].ground !== null && view.render !== 'xray'
+  }
+
+  /**
+   * One inside-out copy per part, parented beside it so it follows every bone.
+   * Rebuilt rather than tweaked, because its geometry carries its own normals.
+   */
+  function drawOutlines(): void {
+    for (const copy of outlines) {
+      const mesh = copy as THREE.Mesh
+      mesh.geometry?.dispose()
+      copy.removeFromParent()
+    }
+    if (outlines.length > 0) ((outlines[0] as THREE.Mesh).material as THREE.Material)?.dispose()
+    outlines = []
+    // An edge drawn round a wireframe, an x-ray or a silhouette is noise.
+    const wanted = view.outline > 0.01 && (view.render === 'lit' || view.render === 'unlit' || view.render === 'toon')
+    if (!creature || !wanted) return
+
+    const material = outlineMaterial(view.outline)
+    const parts: THREE.Mesh[] = []
+    creature.root.traverse((node) => {
+      const mesh = node as THREE.Mesh
+      if (mesh.isMesh && mesh.geometry && mesh.name !== 'outline') parts.push(mesh)
+    })
+
+    for (const mesh of parts) {
+      const skinned = mesh as THREE.SkinnedMesh
+      const geometry = withSmoothNormals(mesh.geometry)
+      const copy = skinned.isSkinnedMesh
+        ? new THREE.SkinnedMesh(geometry, material)
+        : new THREE.Mesh(geometry, material)
+
+      copy.name = 'outline'
+      copy.frustumCulled = false
+      copy.renderOrder = -1
+      copy.position.copy(mesh.position)
+      copy.quaternion.copy(mesh.quaternion)
+      copy.scale.copy(mesh.scale)
+      // Beside the part, under the same joint, so it follows every pose.
+      mesh.parent?.add(copy)
+      if (skinned.isSkinnedMesh) (copy as THREE.SkinnedMesh).bind(skinned.skeleton, skinned.bindMatrix)
+      outlines.push(copy)
+    }
   }
 
   function show(next: Creature, nextStance: Stance): void {
@@ -358,10 +440,26 @@ export function createViewport(canvas: HTMLCanvasElement): Viewport {
     const bounds = new THREE.Box3().setFromObject(next.root)
     if (bounds.isEmpty()) return
 
-    const sphere = bounds.getBoundingSphere(new THREE.Sphere())
-    controls.target.copy(sphere.center)
+    const centre = bounds.getCenter(new THREE.Vector3())
+    controls.target.copy(centre)
 
-    const needed = frameDistance(sphere.radius, camera.fov, camera.aspect)
+    // The direction the camera will be looking from, so the box can be measured
+    // against the frame it will actually land in.
+    const forward = orbited
+      ? camera.position.clone().sub(centre).normalize()
+      : orbitPoint(centre, 1, HOUSE_VIEW.azimuth, HOUSE_VIEW.elevation).sub(centre).normalize()
+    if (forward.lengthSq() < 1e-8) forward.set(0.5, 0.35, 0.8).normalize()
+
+    const right = new THREE.Vector3().crossVectors(new THREE.Vector3(0, 1, 0), forward).normalize()
+    if (right.lengthSq() < 1e-8) right.set(1, 0, 0)
+    const up = new THREE.Vector3().crossVectors(forward, right).normalize()
+
+    const needed = frameBoxDistance(
+      bounds.getSize(new THREE.Vector3()),
+      { right, up, forward },
+      camera.fov,
+      camera.aspect,
+    )
     const wanted = THREE.MathUtils.clamp(needed, controls.minDistance, controls.maxDistance)
 
     // Nobody has orbited: take the house angle outright rather than inheriting
@@ -429,7 +527,12 @@ export function createViewport(canvas: HTMLCanvasElement): Viewport {
       snapGrid.set(gridSize, gridSize * 0.75)
       setScenery(next.background)
       inspector.setLenses(new Set(next.lenses))
+      const changedOutline = next.outline !== shownOutline
       dress()
+      if (changedOutline) {
+        shownOutline = next.outline
+        drawOutlines()
+      }
     },
     focus: (lens) => inspector.focus(lens),
     dispose() {
@@ -445,6 +548,26 @@ export function createViewport(canvas: HTMLCanvasElement): Viewport {
       renderer.dispose()
     },
   }
+}
+
+/**
+ * The outline: the model again, inside out, pushed out along its own smoothed
+ * normals by a constant number of pixels whatever the distance.
+ */
+function outlineMaterial(width: number): THREE.Material {
+  const material = new THREE.MeshBasicMaterial({ color: 0x0a0d12, side: THREE.BackSide })
+  material.onBeforeCompile = (shader) => {
+    shader.uniforms.uWidth = { value: width }
+    shader.uniforms.uSnap = { value: snapGrid }
+    shader.vertexShader = `uniform float uWidth;\nuniform vec2 uSnap;\n${shader.vertexShader}`.replace(
+      '#include <project_vertex>',
+      `#include <project_vertex>
+      vec3 outlineNormal = normalize(normalMatrix * objectNormal);
+      gl_Position.xy += outlineNormal.xy * uWidth * gl_Position.w * 0.012;
+      gl_Position.xy = floor(uSnap * gl_Position.xy / gl_Position.w + 0.5) / uSnap * gl_Position.w;`,
+    )
+  }
+  return material
 }
 
 /** Banded rather than smooth, which is what makes a toon shader a toon shader. */

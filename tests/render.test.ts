@@ -13,6 +13,7 @@ import {
   type RenderMode,
 } from '../src/render'
 import { generate } from '../src/generate'
+import { withSmoothNormals } from '../src/geometry'
 import { MUTATIONS, defaultSpec } from '../src/spec'
 
 /** What a viewer would actually notice about a material, as a comparable key. */
@@ -266,5 +267,82 @@ describe('where the camera stands', () => {
     expect(sphere.center.y).toBeGreaterThan(bounds.min.y)
     expect(sphere.center.y).toBeLessThan(bounds.max.y)
     expect(Math.abs(sphere.center.y - (bounds.min.y + bounds.max.y) / 2)).toBeLessThan(1e-6)
+  })
+})
+
+describe('the outline', () => {
+  test('is on by default, because without textures nothing else separates a limb from the body', () => {
+    expect(defaultView().outline).toBeGreaterThan(0)
+  })
+
+  test('starts at a resolution a creature can actually be read at', () => {
+    // 48 + p^1.7 * 820 is the buffer height; a creature fills roughly 60% of it.
+    const buffer = 48 + defaultView().pixels ** 1.7 * 820
+    expect(buffer * 0.6).toBeGreaterThan(150)
+  })
+
+  test('smoothing normals leaves the geometry otherwise alone', () => {
+    const creature = generate(defaultSpec())
+    let checked = 0
+
+    creature.root.traverse((node) => {
+      const mesh = node as THREE.Mesh
+      if (!mesh.isMesh || checked > 2) return
+      checked++
+
+      const smooth = withSmoothNormals(mesh.geometry)
+      const before = mesh.geometry.getAttribute('position')
+      const after = smooth.getAttribute('position')
+
+      expect(after.count).toBe(before.count)
+      for (let i = 0; i < before.count; i += 7) {
+        expect(after.getX(i)).toBeCloseTo(before.getX(i), 6)
+      }
+    })
+
+    expect(checked).toBeGreaterThan(0)
+  })
+
+  test('smoothing actually shares a normal between faces that meet', () => {
+    const creature = generate(defaultSpec())
+    let shared = false
+
+    creature.root.traverse((node) => {
+      const mesh = node as THREE.Mesh
+      if (!mesh.isMesh || shared) return
+
+      const flat = mesh.geometry.getAttribute('normal')
+      const smooth = withSmoothNormals(mesh.geometry).getAttribute('normal')
+      if (!flat) return
+
+      // An outline pushed along per-face normals bursts the model apart; this is
+      // the whole reason the outline carries its own copy of the geometry.
+      for (let i = 0; i < flat.count; i++) {
+        if (Math.abs(flat.getX(i) - smooth.getX(i)) > 1e-4) {
+          shared = true
+          break
+        }
+      }
+    })
+
+    expect(shared).toBe(true)
+  })
+
+  test('leaves every vertex normal a unit vector', () => {
+    // Meshes hang off joints, not off the root, so this has to go looking.
+    const meshes: THREE.Mesh[] = []
+    generate(defaultSpec()).root.traverse((node) => {
+      const mesh = node as THREE.Mesh
+      if (mesh.isMesh && mesh.geometry) meshes.push(mesh)
+    })
+    expect(meshes.length).toBeGreaterThan(0)
+
+    for (const mesh of meshes.slice(0, 4)) {
+      const normal = withSmoothNormals(mesh.geometry).getAttribute('normal')
+      for (let i = 0; i < normal.count; i += 11) {
+        const length = Math.hypot(normal.getX(i), normal.getY(i), normal.getZ(i))
+        expect(length, `${mesh.name} vertex ${i}`).toBeCloseTo(1, 4)
+      }
+    }
   })
 })

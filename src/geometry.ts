@@ -402,3 +402,44 @@ export function mirrorX(geometry: THREE.BufferGeometry): THREE.BufferGeometry {
   geometry.boundingSphere = null
   return geometry
 }
+
+/**
+ * A copy of a geometry whose normals are averaged between vertices that share a
+ * position, rather than being per-face.
+ *
+ * Flat shading wants unshared vertices, which is why everything here is
+ * non-indexed — but an outline pushed along per-face normals bursts the model
+ * into separate faces. This is the one place that needs a smooth normal, and it
+ * gets its own copy rather than compromising the shading.
+ */
+export function withSmoothNormals(geometry: THREE.BufferGeometry): THREE.BufferGeometry {
+  const copy = geometry.clone()
+  const position = copy.getAttribute('position')
+  if (!position) return copy
+  if (!copy.getAttribute('normal')) copy.computeVertexNormals()
+  const normal = copy.getAttribute('normal') as THREE.BufferAttribute
+
+  const shared = new Map<string, THREE.Vector3>()
+  const key = (i: number) =>
+    `${Math.round(position.getX(i) * 1e4)},${Math.round(position.getY(i) * 1e4)},${Math.round(position.getZ(i) * 1e4)}`
+
+  for (let i = 0; i < position.count; i++) {
+    const at = key(i)
+    const sum = shared.get(at)
+    if (sum) sum.set(sum.x + normal.getX(i), sum.y + normal.getY(i), sum.z + normal.getZ(i))
+    else shared.set(at, new THREE.Vector3(normal.getX(i), normal.getY(i), normal.getZ(i)))
+  }
+
+  const smoothed = new THREE.Vector3()
+  for (let i = 0; i < position.count; i++) {
+    const sum = shared.get(key(i))
+    if (!sum) continue
+    smoothed.copy(sum)
+    if (smoothed.lengthSq() < 1e-12) continue
+    smoothed.normalize()
+    normal.setXYZ(i, smoothed.x, smoothed.y, smoothed.z)
+  }
+
+  normal.needsUpdate = true
+  return copy
+}

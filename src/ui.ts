@@ -143,6 +143,18 @@ function mountModes(
         handlers.onViewChange(view)
       }),
     ),
+    group('OUTLINE', dial(view.outline, (value) => {
+      view.outline = value
+      handlers.onViewChange(view)
+    })),
+    group('PIXELS', dial(view.pixels, (value) => {
+      view.pixels = value
+      handlers.onViewChange(view)
+    })),
+    group('WOBBLE', dial(view.wobble, (value) => {
+      view.wobble = value
+      handlers.onViewChange(view)
+    })),
     span('spacer'),
     rollButton(() => remount(randomSpec(Math.random, spec.detail.level, spec.body.mesh, spec.body.mutation))),
   )
@@ -344,6 +356,19 @@ function group(label: string, content: HTMLElement): HTMLElement {
   const box = el('div', 'group')
   box.append(text(label), content)
   return box
+}
+
+/** A compact slider for the mode strip, where there is no room for a label row. */
+function dial(value: number, onInput: (value: number) => void): HTMLElement {
+  const input = document.createElement('input')
+  input.type = 'range'
+  input.min = '0'
+  input.max = '1'
+  input.step = '0.01'
+  input.value = String(value)
+  input.className = 'dial'
+  input.addEventListener('input', () => onInput(Number(input.value)))
+  return input
 }
 
 function tab(left: string, right: string): HTMLElement {
