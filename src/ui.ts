@@ -1,4 +1,5 @@
 import { GAITS, type Gait } from './animate'
+import { fitElement } from './density'
 import { LENSES, LENS_LABEL, type Lens } from './inspect'
 import { BACKGROUNDS, RENDER_MODES, type ViewSettings } from './render'
 import {
@@ -78,6 +79,10 @@ export function mountUi(zones: Zones, spec: CreatureSpec, view: ViewSettings, ha
   mountModes(zones.modes, spec, view, handlers, changed, remount)
   mountRail(zones.rail, spec, changed, handlers)
   mountSpec(zones.spec, spec, changed, handlers)
+
+  // New content, so the rails re-measure rather than keeping an old level.
+  fitElement(zones.rail)
+  fitElement(zones.spec)
 }
 
 /** The title block's solved totals, rewritten whenever a creature is built. */
@@ -165,6 +170,47 @@ function mountRail(panel: HTMLElement, spec: CreatureSpec, changed: () => void, 
       )
       return [tab(`A${index + 1}  ${family.title.toUpperCase()}`, String(family.items.length)), pack]
     }),
+    tab('A4  HEAD', ''),
+    packed('five', [
+      choices(HEAD_TYPES, spec.head.type, (type) => {
+        spec.head.type = type
+        changed()
+      }),
+      choices(HORN_COUNTS, spec.head.horns, (horns) => {
+        spec.head.horns = horns
+        changed()
+      }),
+      choices(EYE_COUNTS, spec.head.eyes, (eyes) => {
+        spec.head.eyes = eyes
+        changed()
+      }),
+      choices(EAR_TYPES, spec.head.ears, (ears) => {
+        spec.head.ears = ears
+        changed()
+      }),
+    ]),
+    tab('A5  TAIL & BACK', ''),
+    packed('four', [
+      choices(TAIL_TYPES, spec.tail.type, (type) => {
+        spec.tail.type = type
+        changed()
+      }),
+      choices(RIDGE_TYPES, spec.back.ridge, (ridge) => {
+        spec.back.ridge = ridge
+        changed()
+      }),
+      choices(WING_TYPES, spec.wings.type, (type) => {
+        spec.wings.type = type
+        changed()
+      }),
+    ]),
+    tab('A6  MARKINGS', ''),
+    packed('three', [
+      choices(PATTERNS, spec.skin.pattern, (pattern) => {
+        spec.skin.pattern = pattern
+        changed()
+      }),
+    ]),
     el('div', 'grow'),
     tab('LEGEND', ''),
     legend(),
@@ -220,50 +266,9 @@ function mountSpec(panel: HTMLElement, spec: CreatureSpec, changed: () => void, 
       }, 'solve', handlers),
     ]),
     lines(['limbs.back', 'limbs.front', 'legs.length', 'legs.thickness', 'arms.length', 'arms.thickness'], spec, changed, handlers),
-    tab('B5  HEAD', ''),
-    packed('five', [
-      choices(HEAD_TYPES, spec.head.type, (type) => {
-        spec.head.type = type
-        changed()
-      }),
-      choices(HORN_COUNTS, spec.head.horns, (horns) => {
-        spec.head.horns = horns
-        changed()
-      }),
-      choices(EYE_COUNTS, spec.head.eyes, (eyes) => {
-        spec.head.eyes = eyes
-        changed()
-      }),
-      choices(EAR_TYPES, spec.head.ears, (ears) => {
-        spec.head.ears = ears
-        changed()
-      }),
-    ]),
-    lines(['head.length', 'head.width'], spec, changed, handlers),
-    tab('B6  TAIL & BACK', ''),
-    packed('four', [
-      choices(TAIL_TYPES, spec.tail.type, (type) => {
-        spec.tail.type = type
-        changed()
-      }),
-      choices(RIDGE_TYPES, spec.back.ridge, (ridge) => {
-        spec.back.ridge = ridge
-        changed()
-      }),
-      choices(WING_TYPES, spec.wings.type, (type) => {
-        spec.wings.type = type
-        changed()
-      }),
-    ]),
-    tab('B7  MARKINGS', ''),
-    packed('four', [
-      choices(PATTERNS, spec.skin.pattern, (pattern) => {
-        spec.skin.pattern = pattern
-        changed()
-      }),
-    ]),
-    lines(['skin.scale', 'skin.strength'], spec, changed, handlers),
-    tab('B8  PALETTE', ''),
+    tab('B5  HEAD & SKIN', ''),
+    lines(['head.length', 'head.width', 'skin.scale', 'skin.strength'], spec, changed, handlers),
+    tab('B6  PALETTE', ''),
     palette(spec, changed),
     el('div', 'grow'),
     totalsBlock(),

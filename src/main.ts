@@ -4,6 +4,7 @@ import { generate } from './generate'
 import type { Lens } from './inspect'
 import { createViewport, defaultView, type ViewSettings } from './render'
 import { defaultSpec, identOf, type CreatureSpec } from './spec'
+import { keepFitted } from './density'
 import { mountUi, reportTotals } from './ui'
 
 const need = <T extends Element>(selector: string): T => {
@@ -23,6 +24,8 @@ const zones = {
 
 const viewport = createViewport(canvas)
 const view: ViewSettings = defaultView()
+
+let refit: (() => void) | null = null
 
 function show(spec: CreatureSpec): void {
   const creature = generate(spec)
@@ -45,3 +48,8 @@ mountUi(zones, spec, view, {
 
 viewport.setView(view)
 show(spec)
+
+// The rails compress to whatever height the window gives them, and keep
+// compressing as it changes shape.
+refit = keepFitted([zones.rail, zones.spec])
+window.addEventListener('beforeunload', () => refit?.())
