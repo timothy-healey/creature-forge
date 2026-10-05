@@ -87,14 +87,22 @@ export function mountUi(zones: Zones, spec: CreatureSpec, view: ViewSettings, ha
 /** The title block's solved totals, rewritten whenever a creature is built. */
 export function reportTotals(
   zone: HTMLElement,
-  totals: { triangles: number; joints: number; limbs: number; ident: string },
+  totals: { triangles: number; joints: number; limbs: number },
 ): void {
   const block = zone.querySelector('[data-totals]')
   if (!block) return
   block.querySelector('[data-tris]')!.textContent = String(totals.triangles)
   block.querySelector('[data-joints]')!.textContent = String(totals.joints)
   block.querySelector('[data-limbs]')!.textContent = String(totals.limbs)
-  zone.querySelector('[data-ident]')!.textContent = totals.ident
+}
+
+/**
+ * The drawing number. Rewritten on a view change as well as a build, because
+ * the view is part of what a share link carries.
+ */
+export function reportIdent(zone: HTMLElement, ident: string): void {
+  const slot = zone.querySelector('[data-ident]')
+  if (slot) slot.textContent = ident
 }
 
 // ─── the mode strip ─────────────────────────────────────────────────────────
@@ -319,9 +327,33 @@ function totalsBlock(): HTMLElement {
 }
 
 function identBlock(): HTMLElement {
-  const block = el('dl', 'ident')
-  block.innerHTML = '<dt>IDENT</dt><dd data-ident>&mdash;</dd>'
+  const block = el('div', 'ident')
+  const list = el('dl')
+  list.innerHTML = '<dt>IDENT</dt><dd data-ident>&mdash;</dd>'
+  block.append(list, copyButton())
   return block
+}
+
+/**
+ * The link is the creature. Copying the address is the whole share mechanism,
+ * so it gets a control rather than an instruction to select the address bar.
+ */
+function copyButton(): HTMLElement {
+  const button = document.createElement('button')
+  button.type = 'button'
+  button.className = 'copy'
+  button.textContent = 'Copy link'
+  button.addEventListener('click', async () => {
+    try {
+      await navigator.clipboard.writeText(window.location.href)
+      button.textContent = 'Copied'
+    } catch {
+      // A denied clipboard is not a failure worth a dialog: say what to do instead.
+      button.textContent = 'Copy from the address bar'
+    }
+    window.setTimeout(() => void (button.textContent = 'Copy link'), 1600)
+  })
+  return button
 }
 
 // ─── pieces ─────────────────────────────────────────────────────────────────

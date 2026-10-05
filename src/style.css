@@ -365,9 +365,25 @@ input[type="color"] {
 .ident {
   border-top: 1px solid var(--rule-strong);
   padding: 4px 8px;
+  display: flex;
+  align-items: flex-end;
+  justify-content: space-between;
+  gap: 8px;
 }
 
-.ident dd { color: var(--chosen); font-size: 13px; letter-spacing: 0.04em; }
+.ident dl { margin: 0; min-width: 0; }
+.ident dd { margin: 0; color: var(--chosen); font-size: 13px; letter-spacing: 0.04em; }
+
+/* The link is the creature, so copying it is a control, not an instruction. */
+.copy {
+  flex: none;
+  font-family: var(--figure);
+  font-size: 9px;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  padding: 2px 6px;
+  white-space: nowrap;
+}
 
 .grow { flex-grow: 1; }
 

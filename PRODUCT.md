@@ -58,12 +58,14 @@ no model files and no textures.
 pairs placed anywhere along it with two to five bones each; head, face, eyes,
 ears, horns, tail, ridge and wings, each able to be absent; three shape genes;
 a detail slider that slides the same silhouette between roughly 250 and 3000
-triangles; six procedural marking patterns; eighteen structural mutations;
-jointed and skinned mesh modes; seven render modes; six backgrounds; two gaits.
+triangles; six procedural marking patterns; twelve structural mutations;
+jointed and skinned mesh modes; four render modes; four backgrounds; two gaits.
+Every one of those values, and the view it is being looked at under, packs into
+a 73-character code that the address bar carries, so a creature is a link.
 
-**Missing, and known to be missing.** No save, no load, no share, no export, no
-undo, no way to lock part of a creature and reroll the rest. A creature cannot
-currently leave the app, which is the gap that makes it read as a demo.
+**Missing, and known to be missing.** No .glb export, no undo, no way to lock
+part of a creature and reroll the rest. A creature can leave as a link but not
+yet as a file.
 
 **Deliberately undecided.** The author declined to fix any constraint as
 permanent. The low-poly era look, vertex-colours-only, and fully-generated
