@@ -83,24 +83,6 @@ describe('markings', () => {
     expect(drift(bold)).toBeGreaterThan(drift(faint) * 2)
   })
 
-  test('scale decides how big the markings are', () => {
-    const fine = sharePaintedAt('stripes', 0.08)
-    const coarse = sharePaintedAt('stripes', 0.9)
-
-    expect(fine).not.toBeCloseTo(coarse, 2)
-  })
-
-  function sharePaintedAt(pattern: CreatureSpec['skin']['pattern'], scale: number): number {
-    const plain = faceColours(defaultSpec())
-    const marked = faceColours(painted((spec) => {
-      spec.skin.pattern = pattern
-      spec.skin.scale = scale
-    }))
-    let changed = 0
-    for (let i = 0; i < plain.length; i++) if (Math.abs(plain[i]! - marked[i]!) > 1e-4) changed++
-    return changed / plain.length
-  }
-
   test('survive every mutation and both mesh modes', () => {
     for (const mutation of MUTATIONS) {
       for (const mesh of MESH_MODES) {

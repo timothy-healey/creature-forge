@@ -58,7 +58,6 @@ const REVEALS: Partial<Record<SliderPath, Lens>> = {
   'detail.level': 'rings',
   'shape.edge': 'rings',
   'shape.section': 'rings',
-  'shape.bulk': 'rings',
   'spine.arch': 'spine',
   'spine.sway': 'spine',
   'limbs.back': 'solve',
@@ -167,6 +166,8 @@ function mountRail(panel: HTMLElement, spec: CreatureSpec, changed: () => void, 
 
   panel.replaceChildren(
     ...MUTATION_GROUPS.flatMap((family, index) => {
+      // Two regardless of how many are in the family: a mutation's name is a
+      // word, not a count, and `segmented` has nowhere to go in a fifth of a rail.
       const pack = el('div', 'pack two')
       pack.append(
         ...family.items.map((mutation) => {
@@ -183,26 +184,26 @@ function mountRail(panel: HTMLElement, spec: CreatureSpec, changed: () => void, 
       return [tab(`A${index + 1}  ${family.title.toUpperCase()}`, String(family.items.length)), pack]
     }),
     tab('A4  HEAD', ''),
-    packed('five', [
+    stack([
       choices(HEAD_TYPES, spec.head.type, (type) => {
         spec.head.type = type
-        changed()
-      }),
-      choices(HORN_COUNTS, spec.head.horns, (horns) => {
-        spec.head.horns = horns
-        changed()
-      }),
-      choices(EYE_COUNTS, spec.head.eyes, (eyes) => {
-        spec.head.eyes = eyes
         changed()
       }),
       choices(EAR_TYPES, spec.head.ears, (ears) => {
         spec.head.ears = ears
         changed()
       }),
+      choices(EYE_COUNTS, spec.head.eyes, (eyes) => {
+        spec.head.eyes = eyes
+        changed()
+      }),
+      choices(HORN_COUNTS, spec.head.horns, (horns) => {
+        spec.head.horns = horns
+        changed()
+      }),
     ]),
     tab('A5  TAIL & BACK', ''),
-    packed('four', [
+    stack([
       choices(TAIL_TYPES, spec.tail.type, (type) => {
         spec.tail.type = type
         changed()
@@ -217,7 +218,7 @@ function mountRail(panel: HTMLElement, spec: CreatureSpec, changed: () => void, 
       }),
     ]),
     tab('A6  MARKINGS', ''),
-    packed('three', [
+    stack([
       choices(PATTERNS, spec.skin.pattern, (pattern) => {
         spec.skin.pattern = pattern
         changed()
@@ -243,11 +244,11 @@ function legend(): HTMLElement {
 function mountSpec(panel: HTMLElement, spec: CreatureSpec, changed: () => void, handlers: UiHandlers): void {
   panel.replaceChildren(
     tab('B1  SHAPE', ''),
-    lines(['detail.level', 'shape.edge', 'shape.section', 'shape.bulk', 'bake.amount'], spec, changed, handlers),
+    lines(['detail.level', 'shape.edge', 'shape.section', 'bake.amount'], spec, changed, handlers),
     tab('B2  SPINE', ''),
     lines(['spine.arch', 'spine.sway'], spec, changed, handlers),
     tab('B3  FRAME', ''),
-    packed('four', [
+    stack([
       choices(BUILDS, spec.body.build, (build) => {
         spec.body.build = build
         changed()
@@ -259,7 +260,7 @@ function mountSpec(panel: HTMLElement, spec: CreatureSpec, changed: () => void, 
     ]),
     lines(['torso.height', 'torso.width', 'torso.depth', 'neck.length'], spec, changed, handlers),
     tab('B4  LIMBS', ''),
-    packed('four', [
+    stack([
       choices(PAIR_COUNTS, spec.limbs.pairs, (pairs) => {
         spec.limbs.pairs = pairs
         changed()
@@ -279,7 +280,7 @@ function mountSpec(panel: HTMLElement, spec: CreatureSpec, changed: () => void, 
     ]),
     lines(['limbs.back', 'limbs.front', 'legs.length', 'legs.thickness', 'arms.length', 'arms.thickness'], spec, changed, handlers),
     tab('B5  HEAD & SKIN', ''),
-    lines(['head.length', 'head.width', 'tail.length', 'skin.scale', 'skin.strength'], spec, changed, handlers),
+    lines(['head.length', 'head.width', 'tail.length', 'skin.strength'], spec, changed, handlers),
     tab('B6  PALETTE', ''),
     palette(spec, changed),
     el('div', 'grow'),
@@ -377,12 +378,27 @@ function tab(left: string, right: string): HTMLElement {
   return box
 }
 
-function packed(columns: string, rows: HTMLElement[]): HTMLElement {
+/**
+ * How many columns a row of `count` choices lays itself out in: up to five, one
+ * per option, and beyond that an even split. A grid sized to the whole list
+ * leaves the last option standing alone on a row of its own.
+ */
+export function columnsFor(count: number): number {
+  const options = Math.max(1, Math.round(count))
+  return options <= 5 ? options : Math.ceil(options / 2)
+}
+
+const COLUMN_WORDS = ['one', 'two', 'three', 'four', 'five', 'six'] as const
+
+function gridClass(count: number): string {
+  const columns = columnsFor(count)
+  return `pack ${COLUMN_WORDS[Math.min(columns, COLUMN_WORDS.length) - 1]}`
+}
+
+/** Several pickers stacked, each already sized to its own list. */
+function stack(rows: HTMLElement[]): HTMLElement {
   const wrap = el('div')
-  for (const row of rows) {
-    row.className = `pack ${columns}`
-    wrap.append(row)
-  }
+  wrap.append(...rows)
   return wrap
 }
 
@@ -463,7 +479,7 @@ function choices<T extends string | number>(
   lens: Lens | null = null,
   handlers?: UiHandlers,
 ): HTMLElement {
-  const row = el('div')
+  const row = el('div', gridClass(options.length))
   const buttons = options.map((option) => {
     const button = choiceButton(String(option), option === selected, () => {
       for (const other of buttons) other.setAttribute('aria-pressed', 'false')

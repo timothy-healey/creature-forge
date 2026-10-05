@@ -28,7 +28,7 @@ const footJoints = (creature: ReturnType<typeof generate>) =>
  * plain creature, so this — not `defaultSpec()` — is what "the same surface"
  * means when counting triangles.
  */
-function sameSurface(mutation: CreatureSpec['body']['mutation'] = 'flattened'): number {
+function sameSurface(mutation: CreatureSpec['body']['mutation']): number {
   const spec = defaultSpec()
   spec.body.mutation = mutation
   return generate(spec).triangleCount
@@ -112,82 +112,6 @@ describe('the radial mutation', () => {
   })
 })
 
-describe('the shattered mutation', () => {
-  const shattered = (edit: (spec: CreatureSpec) => void = () => {}): CreatureSpec => {
-    const spec = defaultSpec()
-    spec.body.mutation = 'shattered'
-    edit(spec)
-    return spec
-  }
-
-  const vertices = (creature: ReturnType<typeof generate>): THREE.Vector3[] => {
-    const out: THREE.Vector3[] = []
-    creature.root.updateMatrixWorld(true)
-    creature.root.traverse((node) => {
-      const mesh = node as THREE.Mesh
-      if (!mesh.isMesh) return
-      const position = mesh.geometry.getAttribute('position')
-      for (let i = 0; i < position.count; i++) {
-        out.push(new THREE.Vector3().fromBufferAttribute(position, i).applyMatrix4(mesh.matrixWorld))
-      }
-    })
-    return out
-  }
-
-  test('keeps every triangle — it detaches them, it does not destroy them', () => {
-    expect(generate(shattered()).triangleCount).toBe(sameSurface())
-  })
-
-  test('holds the creature’s silhouette while doing it', () => {
-    const whole = generate(defaultSpec())
-    const broken = generate(shattered())
-    whole.root.updateMatrixWorld(true)
-    broken.root.updateMatrixWorld(true)
-
-    const a = new THREE.Box3().setFromObject(whole.root).getSize(new THREE.Vector3())
-    const b = new THREE.Box3().setFromObject(broken.root).getSize(new THREE.Vector3())
-
-    for (const axis of ['x', 'y', 'z'] as const) {
-      expect(Math.abs(b[axis] - a[axis]) / a[axis], axis).toBeLessThan(0.25)
-    }
-  })
-
-  test('actually separates the shards rather than leaving the surface closed', () => {
-    const whole = new Set(vertices(generate(defaultSpec())).map((p) => `${p.x.toFixed(4)},${p.y.toFixed(4)},${p.z.toFixed(4)}`))
-    const broken = new Set(vertices(generate(shattered())).map((p) => `${p.x.toFixed(4)},${p.y.toFixed(4)},${p.z.toFixed(4)}`))
-
-    expect(broken.size).toBeGreaterThan(whole.size)
-  })
-
-  test('shatters the same way every time, so a creature is still itself', () => {
-    const first = vertices(generate(shattered()))
-    const second = vertices(generate(shattered()))
-
-    expect(first).toHaveLength(second.length)
-    for (let i = 0; i < first.length; i += 17) {
-      expect(first[i]!.distanceTo(second[i]!)).toBeLessThan(1e-9)
-    }
-  })
-
-  test('never produces a NaN vertex', () => {
-    for (const mesh of MESH_MODES) {
-      for (const point of vertices(generate(shattered((spec) => void (spec.body.mesh = mesh))))) {
-        expect(Number.isFinite(point.x) && Number.isFinite(point.y) && Number.isFinite(point.z), mesh).toBe(true)
-      }
-    }
-  })
-
-  test('composes with the radial mutation’s own mesh modes', () => {
-    for (const mesh of MESH_MODES) {
-      const creature = generate(shattered((spec) => void (spec.body.mesh = mesh)))
-      creature.root.updateMatrixWorld(true)
-
-      expect(new THREE.Box3().setFromObject(creature.root).isEmpty(), mesh).toBe(false)
-      expect(creature.triangleCount, mesh).toBeGreaterThan(0)
-    }
-  })
-})
-
 describe('the melted mutation', () => {
   const melted = (edit: (spec: CreatureSpec) => void = () => {}): CreatureSpec => {
     const spec = defaultSpec()
@@ -203,7 +127,7 @@ describe('the melted mutation', () => {
   }
 
   test('keeps every triangle — a melted creature is the same surface, lower', () => {
-    expect(generate(melted()).triangleCount).toBe(sameSurface())
+    expect(generate(melted()).triangleCount).toBe(sameSurface('inflated'))
   })
 
   test('slumps: shorter than it was, and wider for it', () => {
@@ -496,60 +420,6 @@ describe('the voxel mutation', () => {
   })
 })
 
-describe('the twisted mutation', () => {
-  const wound = (edit: (spec: CreatureSpec) => void = () => {}): CreatureSpec => {
-    const spec = defaultSpec()
-    spec.body.mutation = 'twisted'
-    edit(spec)
-    return spec
-  }
-
-  test('keeps every triangle — it is a shear, not a rebuild', () => {
-    expect(generate(wound()).triangleCount).toBe(sameSurface())
-  })
-
-  test('leaves the floor alone and carries the top round', () => {
-    const creature = generate(wound())
-    creature.root.updateMatrixWorld(true)
-
-    const low = creature.joints.backFootL!.getWorldPosition(new THREE.Vector3())
-    const high = creature.joints.head!.getWorldPosition(new THREE.Vector3())
-    const straight = generate(defaultSpec())
-    straight.root.updateMatrixWorld(true)
-    const wasLow = straight.joints.backFootL!.getWorldPosition(new THREE.Vector3())
-
-    // Joints are untouched by a deformation; only the surface winds.
-    expect(low.distanceTo(wasLow)).toBeLessThan(0.05)
-    expect(Number.isFinite(high.y)).toBe(true)
-  })
-
-  test('is no longer a straight extrusion: it widens as it winds', () => {
-    const straight = generate(defaultSpec())
-    const twisted = generate(wound())
-    straight.root.updateMatrixWorld(true)
-    twisted.root.updateMatrixWorld(true)
-
-    const a = new THREE.Box3().setFromObject(straight.root)
-    const b = new THREE.Box3().setFromObject(twisted.root)
-
-    expect(b.getSize(new THREE.Vector3()).length()).not.toBeCloseTo(a.getSize(new THREE.Vector3()).length(), 3)
-  })
-
-  test('never produces a NaN vertex, in either mesh mode', () => {
-    for (const mesh of MESH_MODES) {
-      const creature = generate(wound((spec) => void (spec.body.mesh = mesh)))
-      creature.root.traverse((node) => {
-        const mesh3d = node as THREE.Mesh
-        if (!mesh3d.isMesh) return
-        const position = mesh3d.geometry.getAttribute('position')
-        for (let i = 0; i < position.count * 3; i++) {
-          expect(Number.isFinite(position.array[i]), mesh).toBe(true)
-        }
-      })
-    }
-  })
-})
-
 describe('the exploded mutation', () => {
   const apart = (edit: (spec: CreatureSpec) => void = () => {}): CreatureSpec => {
     const spec = defaultSpec()
@@ -724,69 +594,6 @@ describe('the asymmetric mutation', () => {
   })
 })
 
-describe('the inverted mutation', () => {
-  const insideOut = (edit: (spec: CreatureSpec) => void = () => {}): CreatureSpec => {
-    const spec = defaultSpec()
-    spec.body.mutation = 'inverted'
-    edit(spec)
-    return spec
-  }
-
-  const normalsOf = (creature: ReturnType<typeof generate>) => {
-    const out: number[] = []
-    creature.root.updateMatrixWorld(true)
-    creature.root.traverse((node) => {
-      const mesh = node as THREE.Mesh
-      if (!mesh.isMesh || !mesh.name.startsWith('torso')) return
-      const position = mesh.geometry.getAttribute('position')
-      const centre = new THREE.Vector3()
-      mesh.geometry.computeBoundingBox()
-      mesh.geometry.boundingBox!.getCenter(centre)
-
-      for (let i = 0; i < position.count; i += 3) {
-        const a = new THREE.Vector3().fromBufferAttribute(position, i)
-        const b = new THREE.Vector3().fromBufferAttribute(position, i + 1)
-        const c = new THREE.Vector3().fromBufferAttribute(position, i + 2)
-        const normal = new THREE.Vector3().subVectors(b, a).cross(new THREE.Vector3().subVectors(c, a))
-        const outward = new THREE.Vector3().addVectors(a, b).add(c).divideScalar(3).sub(centre)
-        out.push(normal.dot(outward))
-      }
-    })
-    return out
-  }
-
-  test('a normal creature faces outward everywhere', () => {
-    const facings = normalsOf(generate(defaultSpec()))
-
-    expect(facings.length).toBeGreaterThan(0)
-    expect(facings.every((value) => value > 0)).toBe(true)
-  })
-
-  test('an inverted one faces inward everywhere', () => {
-    const facings = normalsOf(generate(insideOut()))
-
-    expect(facings.length).toBeGreaterThan(0)
-    expect(facings.every((value) => value < 0)).toBe(true)
-  })
-
-  test('keeps every triangle and the whole silhouette', () => {
-    const solid = generate(defaultSpec())
-    const hollow = generate(insideOut())
-    solid.root.updateMatrixWorld(true)
-    hollow.root.updateMatrixWorld(true)
-
-    expect(hollow.triangleCount).toBe(sameSurface())
-
-    // Reversing a winding moves nothing, so the shape is identical to the
-    // creature built at the same resolution without the reversal.
-    const straight = generate({ ...defaultSpec(), body: { ...defaultSpec().body, mutation: 'flattened' } })
-    straight.root.updateMatrixWorld(true)
-    const a = new THREE.Box3().setFromObject(solid.root).getSize(new THREE.Vector3())
-    const b = new THREE.Box3().setFromObject(hollow.root).getSize(new THREE.Vector3())
-    expect(b.y).toBeCloseTo(a.y, 1)
-  })
-})
-
 describe('the whole mutation set', () => {
   test('every one of them builds, stands, and keeps the gait’s joints, in both mesh modes', () => {
     for (const mutation of MUTATIONS) {
@@ -832,7 +639,7 @@ describe('the inflated mutation', () => {
   }
 
   test('keeps every triangle — it swells the surface, it does not add to it', () => {
-    expect(generate(swollen()).triangleCount).toBe(sameSurface())
+    expect(generate(swollen()).triangleCount).toBe(sameSurface('melted'))
   })
 
   test('is fatter than the creature it swelled from', () => {
@@ -918,56 +725,6 @@ describe('the lattice mutation', () => {
   })
 })
 
-describe('the flattened mutation', () => {
-  const cutout = (edit: (spec: CreatureSpec) => void = () => {}): CreatureSpec => {
-    const spec = defaultSpec()
-    spec.body.mutation = 'flattened'
-    edit(spec)
-    return spec
-  }
-
-  test('keeps every triangle and loses a dimension', () => {
-    // Measured on a part: the whole body's width is set by how far apart the
-    // limbs are, and pressing a part flat does not move it.
-    const thickness = (spec: CreatureSpec) => {
-      let width = 0
-      generate(spec).root.traverse((node) => {
-        const mesh = node as THREE.Mesh
-        if (!mesh.isMesh || !mesh.name.startsWith('torso')) return
-        mesh.geometry.computeBoundingBox()
-        width = mesh.geometry.boundingBox!.getSize(new THREE.Vector3()).x
-      })
-      return width
-    }
-
-    expect(generate(cutout()).triangleCount).toBe(sameSurface('twisted'))
-    expect(thickness(cutout())).toBeLessThan(thickness(defaultSpec()) * 0.2)
-  })
-
-  test('keeps the height and depth it had, so only the width is lost', () => {
-    const solid = generate(defaultSpec())
-    const paper = generate(cutout())
-    solid.root.updateMatrixWorld(true)
-    paper.root.updateMatrixWorld(true)
-
-    const a = new THREE.Box3().setFromObject(solid.root).getSize(new THREE.Vector3())
-    const b = new THREE.Box3().setFromObject(paper.root).getSize(new THREE.Vector3())
-
-    expect(Math.abs(b.y - a.y) / a.y).toBeLessThan(0.1)
-    expect(Math.abs(b.z - a.z) / a.z).toBeLessThan(0.1)
-  })
-
-  test('presses each part flat where it stands, not onto one plane', () => {
-    const paper = generate(cutout())
-    paper.root.updateMatrixWorld(true)
-
-    const left = paper.joints.backUpperL!.getWorldPosition(new THREE.Vector3())
-    const right = paper.joints.backUpperR!.getWorldPosition(new THREE.Vector3())
-
-    expect(Math.abs(left.x - right.x)).toBeGreaterThan(0.05)
-  })
-})
-
 describe('the coiled mutation', () => {
   const curled = (edit: (spec: CreatureSpec) => void = () => {}): CreatureSpec => {
     const spec = defaultSpec()
@@ -1013,65 +770,6 @@ describe('the coiled mutation', () => {
   })
 })
 
-describe('the swarm mutation', () => {
-  const crowd = (edit: (spec: CreatureSpec) => void = () => {}): CreatureSpec => {
-    const spec = defaultSpec()
-    spec.body.mutation = 'swarm'
-    edit(spec)
-    return spec
-  }
-
-  test('replaces the surface with small bodies — eight triangles apiece', () => {
-    const creature = generate(crowd())
-
-    creature.root.traverse((node) => {
-      const mesh = node as THREE.Mesh
-      if (!mesh.isMesh) return
-      expect(mesh.geometry.getAttribute('position').count % 24, mesh.name).toBe(0)
-    })
-  })
-
-  test('leaves one body behind for every few triangles, not one for each', () => {
-    const surface = sameSurface()
-    const bodies = generate(crowd()).triangleCount / 8
-
-    expect(bodies).toBeGreaterThan(surface / 5)
-    expect(bodies).toBeLessThan(surface / 2)
-  })
-
-  test('still has the creature’s shape, held by the crowd', () => {
-    const solid = generate(defaultSpec())
-    const cloud = generate(crowd())
-    solid.root.updateMatrixWorld(true)
-    cloud.root.updateMatrixWorld(true)
-
-    const a = new THREE.Box3().setFromObject(solid.root).getSize(new THREE.Vector3())
-    const b = new THREE.Box3().setFromObject(cloud.root).getSize(new THREE.Vector3())
-
-    for (const axis of ['x', 'y', 'z'] as const) {
-      expect(Math.abs(b[axis] - a[axis]) / a[axis], axis).toBeLessThan(0.3)
-    }
-  })
-
-  test('varies the size of its bodies rather than stamping one', () => {
-    const creature = generate(crowd())
-    const spans = new Set<number>()
-
-    creature.root.traverse((node) => {
-      const mesh = node as THREE.Mesh
-      if (!mesh.isMesh || !mesh.name.startsWith('torso')) return
-      const position = mesh.geometry.getAttribute('position')
-      for (let i = 0; i < position.count; i += 24) {
-        let widest = 0
-        for (let v = i; v < i + 24; v++) widest = Math.max(widest, Math.abs(position.getX(v)))
-        spans.add(Math.round(widest * 1e4))
-      }
-    })
-
-    expect(spans.size).toBeGreaterThan(3)
-  })
-})
-
 describe('the plated mutation', () => {
   const armoured = (edit: (spec: CreatureSpec) => void = () => {}): CreatureSpec => {
     const spec = defaultSpec()
@@ -1081,7 +779,7 @@ describe('the plated mutation', () => {
   }
 
   test('turns each triangle into a plate with a skirt — seven triangles apiece', () => {
-    expect(generate(armoured()).triangleCount).toBe(sameSurface() * 7)
+    expect(generate(armoured()).triangleCount).toBe(sameSurface('melted') * 7)
   })
 
   test('stays joined to the body: it is armour, not debris', () => {

@@ -21,10 +21,10 @@ import { createInspector, type Lens } from './inspect'
  * era look is being able to take it too far.
  */
 
-export const RENDER_MODES = ['lit', 'unlit', 'toon', 'normals', 'wireframe', 'xray', 'silhouette'] as const
+export const RENDER_MODES = ['lit', 'unlit', 'toon', 'xray'] as const
 export type RenderMode = (typeof RENDER_MODES)[number]
 
-export const BACKGROUNDS = ['void', 'dusk', 'grid', 'snow', 'cave', 'studio'] as const
+export const BACKGROUNDS = ['void', 'dusk', 'grid', 'studio'] as const
 export type Background = (typeof BACKGROUNDS)[number]
 
 /**
@@ -70,24 +70,6 @@ export const SCENERY: Record<Background, Scenery> = {
     fill: '#3050a0',
     brightness: 0.85,
     grid: '#2f6d8a',
-  },
-  snow: {
-    sky: ['#cfe4f2', '#7ca8d8'],
-    ground: '#e8eef5',
-    fog: [5, 18],
-    key: '#ffffff',
-    fill: '#b8d0ea',
-    brightness: 1.3,
-    grid: null,
-  },
-  cave: {
-    sky: ['#0b0a0e', '#0b0a0e'],
-    ground: '#2a211c',
-    fog: [1.6, 6.5],
-    key: '#ffa94a',
-    fill: '#2a3550',
-    brightness: 0.9,
-    grid: null,
   },
   studio: {
     sky: ['#d8d6dd', '#d8d6dd'],
@@ -373,7 +355,7 @@ export function createViewport(canvas: HTMLCanvasElement): Viewport {
     wardrobe.wore(view.render, flat)
     // A see-through or blacked-out creature reads better off the floor.
     ground.visible = SCENERY[view.background].ground !== null && view.render !== 'xray'
-    blob.visible = ground.visible && view.render !== 'silhouette'
+    blob.visible = ground.visible
   }
 
   /**
@@ -388,8 +370,8 @@ export function createViewport(canvas: HTMLCanvasElement): Viewport {
     }
     if (outlines.length > 0) ((outlines[0] as THREE.Mesh).material as THREE.Material)?.dispose()
     outlines = []
-    // An edge drawn round a wireframe, an x-ray or a silhouette is noise.
-    const wanted = view.outline > 0.01 && (view.render === 'lit' || view.render === 'unlit' || view.render === 'toon')
+    // An edge drawn round an x-ray is noise: there is no solid for it to bound.
+    const wanted = view.outline > 0.01 && view.render !== 'xray'
     if (!creature || !wanted) return
 
     const material = outlineMaterial(view.outline)
@@ -598,10 +580,6 @@ export function materialFor(mode: RenderMode, flat: boolean): THREE.Material {
       return new THREE.MeshBasicMaterial({ vertexColors: true })
     case 'toon':
       return new THREE.MeshToonMaterial({ vertexColors: true, gradientMap: toonSteps() })
-    case 'normals':
-      return new THREE.MeshNormalMaterial({ flatShading: flat })
-    case 'wireframe':
-      return new THREE.MeshBasicMaterial({ vertexColors: true, wireframe: true })
     case 'xray':
       return new THREE.MeshBasicMaterial({
         vertexColors: true,
@@ -611,8 +589,6 @@ export function materialFor(mode: RenderMode, flat: boolean): THREE.Material {
         depthWrite: false,
         side: THREE.DoubleSide,
       })
-    case 'silhouette':
-      return new THREE.MeshBasicMaterial({ color: 0x0d0a14 })
     default:
       return new THREE.MeshLambertMaterial({ vertexColors: true, flatShading: flat })
   }

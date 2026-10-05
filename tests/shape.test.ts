@@ -92,7 +92,7 @@ describe('wings', () => {
 })
 
 describe('the shape genes', () => {
-  const withGene = (gene: 'edge' | 'section' | 'bulk', value: number): CreatureSpec => {
+  const withGene = (gene: 'edge' | 'section', value: number): CreatureSpec => {
     const spec = defaultSpec()
     spec.shape[gene] = value
     return spec
@@ -122,38 +122,13 @@ describe('the shape genes', () => {
     expect(soft).toBeGreaterThan(sharp * 1.4)
   })
 
-  test('bulk moves where a creature carries its mass', () => {
-    const widestHeight = (value: number) => {
-      const creature = generate(withGene('bulk', value))
-      creature.root.updateMatrixWorld(true)
-
-      let widest = 0
-      let height = 0
-      creature.root.traverse((child) => {
-        if (!child.name.startsWith('torso')) return
-        const mesh = child as THREE.Mesh
-        const position = mesh.geometry.getAttribute('position')
-        for (let i = 0; i < position.count; i++) {
-          const point = new THREE.Vector3().fromBufferAttribute(position, i).applyMatrix4(mesh.matrixWorld)
-          if (Math.abs(point.x) > widest) {
-            widest = Math.abs(point.x)
-            height = point.y
-          }
-        }
-      })
-      return height
-    }
-
-    expect(widestHeight(1)).toBeGreaterThan(widestHeight(0))
-  })
-
   test('every combination of genes still builds a creature standing on the ground', () => {
     for (const edge of [0, 0.5, 1]) {
       for (const sectionGene of [0, 0.5, 1]) {
-        for (const bulk of [0, 0.5, 1]) {
+        {
           const spec = defaultSpec()
-          spec.shape = { edge, section: sectionGene, bulk }
-          const label = `${edge}/${sectionGene}/${bulk}`
+          spec.shape = { edge, section: sectionGene }
+          const label = `${edge}/${sectionGene}`
 
           const creature = generate(spec)
           creature.root.updateMatrixWorld(true)

@@ -30,55 +30,6 @@ function invalidateBounds(geometry: THREE.BufferGeometry): void {
 }
 
 /**
- * Detaches every triangle and lets it drift: pushed out along its own normal,
- * spun about its centre, and shrunk so a gap opens between it and its
- * neighbours. The creature keeps its silhouette and stops being solid.
- */
-export function shatter(geometry: THREE.BufferGeometry, amount: number): void {
-  const position = geometry.getAttribute('position') as THREE.BufferAttribute
-  const points = position.array as Float32Array
-
-  const a = new THREE.Vector3()
-  const b = new THREE.Vector3()
-  const c = new THREE.Vector3()
-  const centre = new THREE.Vector3()
-  const normal = new THREE.Vector3()
-  const edge = new THREE.Vector3()
-
-  for (let triangle = 0; triangle + 8 < points.length; triangle += 9) {
-    a.set(points[triangle]!, points[triangle + 1]!, points[triangle + 2]!)
-    b.set(points[triangle + 3]!, points[triangle + 4]!, points[triangle + 5]!)
-    c.set(points[triangle + 6]!, points[triangle + 7]!, points[triangle + 8]!)
-
-    normal.subVectors(b, a).cross(edge.subVectors(c, a))
-    if (normal.lengthSq() < EPSILON) continue
-    normal.normalize()
-
-    centre.addVectors(a, b).add(c).divideScalar(3)
-    const drift = amount * (0.3 + noise(centre.x, centre.y, centre.z))
-    const spin = (noise(centre.y, centre.z, centre.x) - 0.5) * 1.1
-
-    let slot = triangle
-    for (const vertex of [a, b, c]) {
-      vertex
-        .sub(centre)
-        .applyAxisAngle(normal, spin)
-        .multiplyScalar(0.78)
-        .add(centre)
-        .addScaledVector(normal, drift)
-      points[slot] = vertex.x
-      points[slot + 1] = vertex.y
-      points[slot + 2] = vertex.z
-      slot += 3
-    }
-  }
-
-  position.needsUpdate = true
-  geometry.computeVertexNormals()
-  invalidateBounds(geometry)
-}
-
-/**
  * Lets the creature collapse.
  *
  * Height is what melts: a vertex slides down by how far above the floor it
@@ -137,28 +88,13 @@ export interface DeformContext {
  * tree exists and its world matrices are current, so a deformation can reason
  * about where a vertex actually is rather than only where it is in its own part.
  */
-export type Deformation =
-  | 'shattered'
-  | 'melted'
-  | 'voxel'
-  | 'twisted'
-  | 'inverted'
-  | 'inflated'
-  | 'lattice'
-  | 'flattened'
-  | 'swarm'
-  | 'plated'
+export type Deformation = 'melted' | 'voxel' | 'inflated' | 'lattice' | 'plated'
 
 export const DEFORMATIONS: readonly Deformation[] = [
-  'shattered',
   'melted',
   'voxel',
-  'twisted',
-  'inverted',
   'inflated',
   'lattice',
-  'flattened',
-  'swarm',
   'plated',
 ]
 
@@ -170,16 +106,8 @@ export function deform(
   const toLocal = new THREE.Matrix4()
 
   for (const part of parts) {
-    if (mutation === 'shattered') {
-      shatter(part.geometry, context.scale * 0.1)
-      continue
-    }
     if (mutation === 'voxel') {
       voxelise(part.geometry, context.scale * 0.21)
-      continue
-    }
-    if (mutation === 'inverted') {
-      invert(part.geometry)
       continue
     }
     if (mutation === 'inflated') {
@@ -190,29 +118,12 @@ export function deform(
       latticeOf(part.geometry, context.scale * 0.022)
       continue
     }
-    if (mutation === 'flattened') {
-      flatten(part.geometry, 0.07)
-      continue
-    }
-    if (mutation === 'swarm') {
-      swarm(part.geometry, context.scale * 0.075, 3)
-      continue
-    }
     if (mutation === 'plated') {
       plate(part.geometry, context.scale * 0.055, 0.22)
       continue
     }
 
     toLocal.copy(part.node.matrixWorld).invert()
-    if (mutation === 'twisted') {
-      twist(part.geometry, part.node.matrixWorld, toLocal, {
-        turns: 0.52,
-        scale: context.scale,
-        ground: context.ground,
-      })
-      continue
-    }
-
     melt(part.geometry, part.node.matrixWorld, toLocal, {
       amount: 0.16,
       scale: context.scale,
@@ -290,36 +201,6 @@ const CUBE_FACES: readonly (readonly Corner[])[] = [
 ]
 
 /**
- * Winds the creature around its own vertical axis: the higher a vertex sits, the
- * further round it is carried. Nothing moves relative to the floor, and nothing
- * is added or removed — the whole body is sheared into a helix.
- */
-export function twist(
-  geometry: THREE.BufferGeometry,
-  toWorld: THREE.Matrix4,
-  toLocal: THREE.Matrix4,
-  options: { turns: number; scale: number; ground: number },
-): void {
-  const position = geometry.getAttribute('position') as THREE.BufferAttribute
-  const point = new THREE.Vector3()
-  const up = new THREE.Vector3(0, 1, 0)
-
-  for (let i = 0; i < position.count; i++) {
-    point.fromBufferAttribute(position, i).applyMatrix4(toWorld)
-
-    const above = (point.y - options.ground) / Math.max(1e-6, options.scale)
-    point.applyAxisAngle(up, options.turns * above)
-
-    point.applyMatrix4(toLocal)
-    position.setXYZ(i, point.x, point.y, point.z)
-  }
-
-  position.needsUpdate = true
-  geometry.computeVertexNormals()
-  invalidateBounds(geometry)
-}
-
-/**
  * Pushes every part away from the body's centre along the line it already sits
  * on, so the creature hangs apart in mid-air without losing its arrangement.
  *
@@ -369,36 +250,6 @@ export function skew(parts: readonly DeformPart[], strength: number): void {
     part.node.rotation.x += (b - 0.5) * strength * 0.9
     part.node.rotation.z += (c - 0.5) * strength * 0.9
   }
-}
-
-/**
- * Turns the surface inside out by reversing every triangle's winding. With
- * back faces culled, the side facing you disappears and you see the far inside
- * of the creature instead — the same shape, read from within.
- */
-export function invert(geometry: THREE.BufferGeometry): void {
-  const position = geometry.getAttribute('position') as THREE.BufferAttribute
-  const color = geometry.getAttribute('color') as THREE.BufferAttribute
-  const points = position.array as Float32Array
-  const tints = color.array as Float32Array
-
-  for (let triangle = 0; triangle + 8 < points.length; triangle += 9) {
-    for (let axis = 0; axis < 3; axis++) {
-      const b = triangle + 3 + axis
-      const c = triangle + 6 + axis
-      const point = points[b]!
-      points[b] = points[c]!
-      points[c] = point
-      const tint = tints[b]!
-      tints[b] = tints[c]!
-      tints[c] = tint
-    }
-  }
-
-  position.needsUpdate = true
-  color.needsUpdate = true
-  geometry.computeVertexNormals()
-  invalidateBounds(geometry)
 }
 
 /**
@@ -506,72 +357,6 @@ export function latticeOf(geometry: THREE.BufferGeometry, thickness: number): vo
       }
     }
   }
-
-  geometry.setAttribute('position', new THREE.BufferAttribute(new Float32Array(positions), 3))
-  geometry.setAttribute('color', new THREE.BufferAttribute(new Float32Array(colors), 3))
-  geometry.setIndex(null)
-  geometry.computeVertexNormals()
-  invalidateBounds(geometry)
-}
-
-/**
- * Presses every part flat across its own width, so a creature built from solids
- * becomes a set of cutouts standing in the same arrangement. The parts keep
- * their silhouettes and lose a dimension.
- */
-export function flatten(geometry: THREE.BufferGeometry, keep: number): void {
-  const position = geometry.getAttribute('position') as THREE.BufferAttribute
-  const points = position.array as Float32Array
-
-  for (let i = 0; i < points.length; i += 3) points[i] = points[i]! * keep
-
-  position.needsUpdate = true
-  geometry.computeVertexNormals()
-  invalidateBounds(geometry)
-}
-
-const OCTAHEDRON: readonly (readonly [number, number, number])[] = [
-  [1, 0, 0], [0, 1, 0], [0, 0, 1],
-  [0, 1, 0], [-1, 0, 0], [0, 0, 1],
-  [-1, 0, 0], [0, -1, 0], [0, 0, 1],
-  [0, -1, 0], [1, 0, 0], [0, 0, 1],
-  [0, 1, 0], [1, 0, 0], [0, 0, -1],
-  [-1, 0, 0], [0, 1, 0], [0, 0, -1],
-  [0, -1, 0], [-1, 0, 0], [0, 0, -1],
-  [1, 0, 0], [0, -1, 0], [0, 0, -1],
-]
-
-/**
- * Dissolves the surface into a crowd. Every few triangles leaves behind one
- * small body where it stood, sized by a hash of the spot, so the creature is a
- * cloud of separate things that together still has its shape.
- */
-export function swarm(geometry: THREE.BufferGeometry, size: number, every: number): void {
-  const position = geometry.getAttribute('position') as THREE.BufferAttribute
-  const color = geometry.getAttribute('color') as THREE.BufferAttribute
-  const points = position.array as Float32Array
-  const tints = color.array as Float32Array
-
-  const positions: number[] = []
-  const colors: number[] = []
-  const step = Math.max(1, Math.round(every)) * 9
-  let taken = 0
-
-  for (let triangle = 0; triangle + 8 < points.length; triangle += step) {
-    const cx = (points[triangle]! + points[triangle + 3]! + points[triangle + 6]!) / 3
-    const cy = (points[triangle + 1]! + points[triangle + 4]! + points[triangle + 7]!) / 3
-    const cz = (points[triangle + 2]! + points[triangle + 5]! + points[triangle + 8]!) / 3
-    const radius = size * (0.5 + noise(cx, cy, cz))
-    taken++
-
-    for (const corner of OCTAHEDRON) {
-      positions.push(cx + corner[0] * radius, cy + corner[1] * radius, cz + corner[2] * radius)
-      colors.push(tints[triangle]!, tints[triangle + 1]!, tints[triangle + 2]!)
-    }
-  }
-
-  // A part too small to hold even one body still has to exist.
-  if (taken === 0) return
 
   geometry.setAttribute('position', new THREE.BufferAttribute(new Float32Array(positions), 3))
   geometry.setAttribute('color', new THREE.BufferAttribute(new Float32Array(colors), 3))

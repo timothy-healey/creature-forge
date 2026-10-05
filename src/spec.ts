@@ -29,21 +29,16 @@ export type MeshMode = 'jointed' | 'skinned'
 export type Mutation =
   | 'none'
   | 'radial'
-  | 'shattered'
   | 'melted'
   | 'strut'
   | 'segmented'
   | 'voxel'
-  | 'twisted'
   | 'exploded'
   | 'recursive'
   | 'asymmetric'
-  | 'inverted'
   | 'inflated'
   | 'lattice'
-  | 'flattened'
   | 'coiled'
-  | 'swarm'
   | 'plated'
 export type FrontLimb = 'arms' | 'forelegs' | 'none'
 export type HeadType = 'none' | 'snout' | 'beak' | 'blunt' | 'crest'
@@ -67,33 +62,11 @@ export const MESH_MODES: readonly MeshMode[] = ['jointed', 'skinned']
  */
 export const MUTATION_GROUPS: readonly { title: string; items: readonly Mutation[] }[] = [
   { title: 'Plan', items: ['none', 'radial', 'segmented', 'coiled', 'recursive'] },
-  { title: 'Surface', items: ['strut', 'lattice', 'voxel', 'swarm', 'plated', 'shattered'] },
-  {
-    title: 'Deform',
-    items: ['melted', 'inflated', 'twisted', 'flattened', 'exploded', 'asymmetric', 'inverted'],
-  },
+  { title: 'Surface', items: ['strut', 'lattice', 'voxel', 'plated'] },
+  { title: 'Deform', items: ['melted', 'inflated', 'exploded', 'asymmetric'] },
 ]
 
-export const MUTATIONS: readonly Mutation[] = [
-  'none',
-  'radial',
-  'shattered',
-  'melted',
-  'strut',
-  'segmented',
-  'voxel',
-  'twisted',
-  'exploded',
-  'recursive',
-  'asymmetric',
-  'inverted',
-  'inflated',
-  'lattice',
-  'flattened',
-  'coiled',
-  'swarm',
-  'plated',
-]
+export const MUTATIONS: readonly Mutation[] = MUTATION_GROUPS.flatMap((group) => group.items)
 export const FRONT_LIMBS: readonly FrontLimb[] = ['arms', 'forelegs', 'none']
 export const HEAD_TYPES: readonly HeadType[] = ['none', 'snout', 'beak', 'blunt', 'crest']
 export const LEG_TYPES: readonly LegType[] = ['digitigrade', 'plantigrade', 'none']
@@ -110,14 +83,14 @@ export const LIMB_SEGMENTS: readonly SegmentsPerLimb[] = [2, 3, 4, 5]
 export interface CreatureSpec {
   body: { build: Build; frontLimb: FrontLimb; mesh: MeshMode; mutation: Mutation }
   /** Markings, painted from the creature's own geometry rather than a texture. */
-  skin: { pattern: Pattern; scale: number; strength: number }
+  skin: { pattern: Pattern; strength: number }
   /** How finely the same shape is described. Slides a creature between eras. */
   detail: { level: number }
   /**
    * Three genes that reshape every part at once, rather than resizing it. They
    * are what stop two creatures with different numbers being the same animal.
    */
-  shape: { edge: number; section: number; bulk: number }
+  shape: { edge: number; section: number }
   /** How hard light is baked into the palette before any lamp reaches it. */
   bake: { amount: number }
   head: { type: HeadType; length: number; width: number; horns: HornCount; eyes: EyeCount; ears: EarType }
@@ -147,9 +120,7 @@ export type SliderPath =
   | 'detail.level'
   | 'shape.edge'
   | 'shape.section'
-  | 'shape.bulk'
   | 'bake.amount'
-  | 'skin.scale'
   | 'skin.strength'
   | 'head.length'
   | 'head.width'
@@ -178,10 +149,8 @@ export const SLIDERS: readonly SliderDef[] = [
   { path: 'detail.level', label: 'Vertices', group: 'Detail' },
   { path: 'shape.edge', label: 'Soft → sharp', group: 'Shape' },
   { path: 'shape.section', label: 'Deep → wide', group: 'Shape' },
-  { path: 'shape.bulk', label: 'Mass fore/aft', group: 'Shape' },
   { path: 'bake.amount', label: 'Baked light', group: 'Shape' },
-  { path: 'skin.scale', label: 'Size', group: 'Markings' },
-  { path: 'skin.strength', label: 'Strength', group: 'Markings' },
+  { path: 'skin.strength', label: 'Markings', group: 'Markings' },
   { path: 'head.length', label: 'Length', group: 'Head' },
   { path: 'head.width', label: 'Width', group: 'Head' },
   { path: 'neck.length', label: 'Length', group: 'Neck' },
@@ -214,9 +183,9 @@ export function defaultSpec(): CreatureSpec {
   return {
     body: { build: 'upright', frontLimb: 'arms', mesh: 'jointed', mutation: 'none' },
     detail: { level: 0.3 },
-    shape: { edge: 0.55, section: 0.45, bulk: 0.5 },
+    shape: { edge: 0.55, section: 0.45 },
     bake: { amount: 0.75 },
-    skin: { pattern: 'none', scale: 0.4, strength: 0.85 },
+    skin: { pattern: 'none', strength: 0.85 },
     head: { type: 'snout', length: 0.5, width: 0.5, horns: 1, eyes: 2, ears: 'none' },
     neck: { length: 0.3 },
     spine: { arch: 0.5, sway: 0.5 },
@@ -319,9 +288,9 @@ export function randomSpec(
     detail: { level: spec_detail },
     // Rolled flat, not biased: the shape genes are the anti-sameness axis, and
     // their whole value is in the extremes a biased roll would never reach.
-    shape: { edge: random(), section: random(), bulk: random() },
+    shape: { edge: random(), section: random() },
     bake: { amount: defaultSpec().bake.amount },
-    skin: { pattern: pick(PATTERNS), scale: 0.2 + random() * 0.6, strength: 0.6 + random() * 0.4 },
+    skin: { pattern: pick(PATTERNS), strength: 0.6 + random() * 0.4 },
     head: {
       type: pick(HEAD_TYPES),
       length: biased(),

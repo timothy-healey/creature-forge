@@ -67,7 +67,7 @@ body {
 
 /* ─── the sheet ──────────────────────────────────────────────────────────── */
 
-.sheet { height: 100%; padding: 14px; }
+.sheet { height: 100%; padding: 10px; }
 
 .frame {
   height: 100%;
@@ -158,7 +158,7 @@ body {
 
 .body {
   display: grid;
-  grid-template-columns: clamp(168px, 15vw, 224px) minmax(0, 1fr) clamp(232px, 20vw, 292px);
+  grid-template-columns: clamp(168px, 14vw, 200px) minmax(0, 1fr) clamp(208px, 17vw, 252px);
   min-height: 0;
 }
 
@@ -198,11 +198,14 @@ body {
   padding: var(--tabpad) 7px;
 }
 
+/* A picker's column count comes from its own option list; see `columnsFor`. */
 .pack { padding: var(--pad); display: grid; gap: var(--gap); }
+.pack.one { grid-template-columns: minmax(0, 1fr); }
 .pack.two { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+.pack.three { grid-template-columns: repeat(3, minmax(0, 1fr)); }
 .pack.four { grid-template-columns: repeat(4, minmax(0, 1fr)); }
 .pack.five { grid-template-columns: repeat(5, minmax(0, 1fr)); }
-.pack.three { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+.pack.six { grid-template-columns: repeat(6, minmax(0, 1fr)); }
 .pack.lines { padding: var(--pad) 8px calc(var(--pad) + 2px); gap: 0; }
 
 /* ─── controls ───────────────────────────────────────────────────────────── */

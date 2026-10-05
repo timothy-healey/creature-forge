@@ -54,9 +54,14 @@ export interface Shape {
   wide: number
   /** Depth multiplier. */
   deep: number
-  /** Where mass sits along a part: 0 at the base, 1 at the far end. */
-  bulk: number
 }
+
+/**
+ * Where mass sits along a part: 0 at the base, 1 at the far end. A house
+ * constant rather than a gene — at era resolution a part carries too few bands
+ * for a moved bulge to read as anything but noise.
+ */
+const BULK = 0.5
 
 export interface Forge {
   dims: Dims
@@ -81,7 +86,7 @@ export interface Placed {
 
 type Point = readonly [number, number]
 
-/** A bulge that peaks wherever the `bulk` gene puts it, zero at both ends. */
+/** A bulge that peaks at `peak` along the part, zero at both ends. */
 function hump(t: number, peak: number): number {
   const at = Math.min(0.9, Math.max(0.1, peak))
   return Math.sin(Math.PI * (t <= at ? t / (2 * at) : 0.5 + (t - at) / (2 * (1 - at))))
@@ -96,7 +101,7 @@ function section(shape: Shape, frontBias = 1): CrossSection {
 // ─── body ───────────────────────────────────────────────────────────────────
 
 export function torsoProfile({ dims, shape }: Forge, segments: number): Profile {
-  const peak = 0.28 + shape.bulk * 0.44
+  const peak = 0.28 + BULK * 0.44
   const ripple = (t: number) => 1 + 0.09 * Math.sin(t * Math.PI * segments * 2)
   const swell = (t: number) => (0.68 + 0.36 * hump(t, peak)) * ripple(t)
 
@@ -139,7 +144,7 @@ export function segment(
         length,
         res.bands(2), res.cluster,
       ),
-      shape: section(shape, 0.88 + shape.bulk * 0.62),
+      shape: section(shape, 0.88 + BULK * 0.62),
       colors: { side: palette.body, belly: palette.belly, cap: palette.belly },
       bellyWidth: 0.95,
     }),
@@ -154,7 +159,7 @@ export function torso(forge: Forge, segments: number): Placed {
     geometry: prism({
       sides: res.sides(6),
       sections: sample(torsoProfile(forge, segments), forge.dims.spineLength, res.bands(Math.max(3, segments * 1.4))),
-      shape: section(shape, 0.88 + shape.bulk * 0.62),
+      shape: section(shape, 0.88 + BULK * 0.62),
       colors: { side: palette.body, belly: palette.belly, cap: palette.belly },
       bellyWidth: 0.95,
     }),
@@ -182,7 +187,7 @@ export function neck({ dims, palette, res, shape }: Forge): Placed {
 // ─── head ───────────────────────────────────────────────────────────────────
 
 export function skullProfile({ dims, shape }: Forge): Profile {
-  const peak = 0.3 + shape.bulk * 0.35
+  const peak = 0.3 + BULK * 0.35
   return {
     rx: (t) => dims.headW * 0.5 * shape.wide * (0.62 + 0.42 * hump(t, peak)),
     rz: (t) => dims.headD * 0.5 * shape.deep * (0.62 + 0.42 * hump(t, peak)),
@@ -200,7 +205,7 @@ export function skullProfile({ dims, shape }: Forge): Profile {
  */
 export function skullFront(forge: Forge, t: number, outward: number): { x: number; z: number } {
   const profile = skullProfile(forge)
-  const bias = 0.95 + forge.shape.bulk * 0.45
+  const bias = 0.95 + BULK * 0.45
   const ring = crossSectionRing(forge.res.sides(6), section(forge.shape, bias))
 
   const facing = ring.filter((corner) => corner.z > 0.05)
@@ -224,7 +229,7 @@ export function skull(forge: Forge): Placed {
     geometry: prism({
       sides: res.sides(6),
       sections: sample(profile, dims.headH, res.bands(2)),
-      shape: section(shape, 0.95 + shape.bulk * 0.45),
+      shape: section(shape, 0.95 + BULK * 0.45),
       colors: { side: palette.body, belly: palette.belly, cap: palette.body },
       bellyWidth: 0.6,
     }),
@@ -474,7 +479,7 @@ export function ear({ dims, palette, res, shape }: Forge, type: CreatureSpec['he
 
 // ─── limbs ──────────────────────────────────────────────────────────────────
 
-/** A limb segment: thin at the far end, bulging where `bulk` puts the muscle. */
+/** A limb segment: thin at the far end, bulging where the muscle sits. */
 export function limb(
   { palette, res, shape, embed }: Forge,
   length: number,
@@ -482,7 +487,7 @@ export function limb(
   bulge: number,
   far: number,
 ): THREE.BufferGeometry {
-  const peak = 0.3 + shape.bulk * 0.4
+  const peak = 0.3 + BULK * 0.4
   const swell = bulge - Math.max(near, far)
   // A bound limb flares where it meets the body, so it reads as growing out of
   // it rather than being posted into it. An unbound one has nothing to hide:

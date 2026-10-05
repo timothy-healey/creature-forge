@@ -114,14 +114,13 @@ export function generate(input: CreatureSpec): Creature {
   dims.headH = dims.headW * 0.82
   dims.headD = dims.headW * 0.86
 
-  // The three genes, resolved. `edge` runs a faceted diamond cross-section up to
-  // a slabby one; `section` trades depth for width; `bulk` moves where the mass
-  // along every part sits. They reshape a creature rather than resizing it.
+  // The two shape genes, resolved. `edge` runs a faceted diamond cross-section
+  // up to a slabby one; `section` trades depth for width. They reshape a
+  // creature rather than resizing it.
   const shape: parts.Shape = {
     power: lerp(2.8, 1.02, spec.shape.edge),
     wide: lerp(0.74, 1.36, spec.shape.section),
     deep: lerp(1.48, 0.66, spec.shape.section),
-    bulk: spec.shape.bulk,
   }
 
   const legLen = lerp(0.28, 0.86, spec.legs.length)
@@ -704,7 +703,6 @@ export function generate(input: CreatureSpec): Creature {
     const standing = new THREE.Box3().setFromObject(root)
     paint(deformable, spec.skin.pattern, {
       colour: new THREE.Color(spec.colors.pattern),
-      scale: spec.skin.scale,
       strength: spec.skin.strength,
       size: Number.isFinite(standing.max.y) ? standing.getSize(new THREE.Vector3()).length() : 1,
       ground: Number.isFinite(standing.min.y) ? standing.min.y : 0,

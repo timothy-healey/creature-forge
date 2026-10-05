@@ -24,7 +24,6 @@ function look(material: THREE.Material): string {
   }
   return [
     material.type,
-    any.wireframe ? 'wire' : '',
     any.vertexColors ? 'vertexColors' : 'flatColour',
     material.transparent ? `alpha${any.opacity}` : 'opaque',
     material.blending === THREE.AdditiveBlending ? 'additive' : 'normal',
@@ -59,11 +58,10 @@ describe('the drawn modes', () => {
     expect(material.gradientMap!.magFilter).toBe(THREE.NearestFilter)
   })
 
-  test('wireframe draws edges, xray sees through, silhouette shows none of the palette', () => {
-    expect((materialFor('wireframe', true) as THREE.MeshBasicMaterial).wireframe).toBe(true)
+  test('xray sees through the creature rather than onto it', () => {
     expect(materialFor('xray', true).transparent).toBe(true)
     expect(materialFor('xray', true).blending).toBe(THREE.AdditiveBlending)
-    expect((materialFor('silhouette', true) as THREE.MeshBasicMaterial).vertexColors).toBe(false)
+    expect(materialFor('xray', true).side).toBe(THREE.DoubleSide)
   })
 
   test.each(RENDER_MODES)('%s honours flat shading where the material has any', (mode: RenderMode) => {
@@ -127,7 +125,7 @@ describe('deciding when to re-dress the meshes', () => {
     const view = defaultView()
     wardrobe.wore(view.render, true)
 
-    view.render = 'wireframe'
+    view.render = 'toon'
 
     expect(wardrobe.needsChange(view.render, true)).toBe(true)
   })

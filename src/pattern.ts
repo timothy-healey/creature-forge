@@ -36,10 +36,11 @@ export interface PaintPart {
   node: THREE.Object3D
 }
 
+/** How large a marking is relative to the creature it sits on. */
+const MARKING_SCALE = 0.4
+
 export interface PaintOptions {
   colour: THREE.Color
-  /** How large the markings are, relative to the creature. */
-  scale: number
   /** How completely a marked face takes the pattern colour. */
   strength: number
   /** The creature's rough size, so a pattern reads the same at any scale. */
@@ -53,7 +54,7 @@ export function paint(parts: readonly PaintPart[], pattern: Pattern, options: Pa
   const world = new THREE.Vector3()
   const local = new THREE.Vector3()
   const tint = new THREE.Color()
-  const frequency = 2.2 / Math.max(1e-4, options.scale * options.size)
+  const frequency = 2.2 / Math.max(1e-4, MARKING_SCALE * options.size)
 
   for (const part of parts) {
     const position = part.geometry.getAttribute('position') as THREE.BufferAttribute
