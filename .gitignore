@@ -1,3 +1,6 @@
 node_modules/
 dist/
 .DS_Store
+
+# Local scratch from the design tooling: a pid, a port, a crash note.
+.impeccable/questions/
