@@ -242,8 +242,20 @@ export function generate(input: CreatureSpec): Creature {
   const beadLength = (dims.spineLength * (coiled ? 1.9 : 1)) / beadCount
   const chain: THREE.Object3D[] = []
 
-  // Total bend down the whole body, shared out between the beads.
-  const arch = coiled ? -TAU : (spec.spine.arch - 0.5) * 3.1
+  /**
+   * An arched spine is a bow, not a hinge.
+   *
+   * One angle shared equally down the chain integrates into a single large
+   * turn: the far end swings right out, and the creature reads as having fallen
+   * over rather than as having curved. So most of the bend goes into a term
+   * that comes back to nothing by the top of the chain — the back bulges and
+   * recovers, the way a swayback or a hunch does — and only a little of it into
+   * a net lean. Coiling is the exception that wants the hinge: a full turn, no
+   * bow, which is what rolls a body into a spiral.
+   */
+  const bend = coiled ? 0 : (spec.spine.arch - 0.5) * 2
+  const lean = coiled ? -TAU : bend * 0.22
+  const bow = bend * 1.9
   const sway = (spec.spine.sway - 0.5) * 2.6
 
   let previous: THREE.Object3D = spine
@@ -255,7 +267,11 @@ export function generate(input: CreatureSpec): Creature {
       { x: 0, y: index === 0 ? 0 : beadLength, z: 0 },
       // Sway is a Z rotation, not a Y one: a bead extends along its own +Y, so
       // turning it about Y moves nothing at all. Z is what swings it sideways.
-      rest(arch / beadCount, 0, (sway * Math.sin(along * TAU) * 2.4) / beadCount),
+      rest(
+        (lean + bow * Math.sin(along * TAU)) / beadCount,
+        0,
+        (sway * Math.sin(along * TAU) * 2.4) / beadCount,
+      ),
     )
     attach(node, parts.segment(forge, spec.torso.segments, index, beadCount, beadLength, segmented ? 1 : 0))
     chain.push(node)

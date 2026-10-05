@@ -52,6 +52,78 @@ describe('the spine', () => {
     expect(bent.y).toBeLessThan(straight.y)
   })
 
+  /**
+   * Where the body's mass sits front to back, against the ground its feet are
+   * on, in body heights. Zero means the creature is standing over its own feet.
+   */
+  function massPastFeet(spec: CreatureSpec): number {
+    const creature = generate(spec)
+    creature.root.updateMatrixWorld(true)
+
+    let sum = 0
+    let count = 0
+    const point = new THREE.Vector3()
+    creature.root.traverse((node) => {
+      const mesh = node as THREE.Mesh
+      if (!mesh.isMesh || !mesh.geometry) return
+      const position = mesh.geometry.getAttribute('position') as THREE.BufferAttribute
+      for (let i = 0; i < position.count; i++) {
+        sum += point.fromBufferAttribute(position, i).applyMatrix4(mesh.matrixWorld).z
+        count++
+      }
+    })
+    const mass = sum / Math.max(1, count)
+
+    let near = Infinity
+    let far = -Infinity
+    for (const [name, node] of Object.entries(creature.joints)) {
+      if (!name.includes('Foot')) continue
+      const z = node.getWorldPosition(new THREE.Vector3()).z
+      near = Math.min(near, z)
+      far = Math.max(far, z)
+    }
+    if (!Number.isFinite(near)) return 0
+
+    const height = new THREE.Box3().setFromObject(creature.root).getSize(new THREE.Vector3()).y
+    // A foot has width of its own; give the footprint that much slack each way.
+    const slack = height * 0.08
+    if (mass < near - slack) return (near - slack - mass) / height
+    if (mass > far + slack) return (mass - far - slack) / height
+    return 0
+  }
+
+  /** The angle of the hips→head chord off vertical, in degrees: the body's axis. */
+  function bodyAxis(arch: number): number {
+    const spec = curved((edit) => void (edit.spine.arch = arch))
+    const creature = generate(spec)
+    creature.root.updateMatrixWorld(true)
+    const head = creature.joints.head!.getWorldPosition(new THREE.Vector3())
+    const hips = creature.joints.body0!.getWorldPosition(new THREE.Vector3())
+    const up = head.sub(hips).normalize().y
+    return (Math.acos(Math.max(-1, Math.min(1, up))) * 180) / Math.PI
+  }
+
+  test('a sagging spine leaves the creature standing over its own feet', () => {
+    for (const build of BUILDS) {
+      for (const arch of [0, 0.25, 0.5, 0.75, 1]) {
+        const spec = curved((edit) => {
+          edit.body.build = build
+          edit.spine.arch = arch
+        })
+        expect(massPastFeet(spec), `${build} at arch ${arch}`).toBeLessThan(0.08)
+      }
+    }
+  })
+
+  test('arch curves the back rather than tipping the whole body over', () => {
+    // A bend shared equally down the chain integrates into one big turn, and the
+    // creature reads as fallen rather than curved. The body's own axis has to
+    // survive the slider.
+    for (const arch of [0, 0.25, 0.75, 1]) {
+      expect(Math.abs(bodyAxis(arch) - bodyAxis(0.5)), `arch ${arch}`).toBeLessThan(26)
+    }
+  })
+
   test('sway swings the body off the midline, either way', () => {
     const offCentre = (sway: number) => {
       const creature = generate(curved((spec) => void (spec.spine.sway = sway)))
