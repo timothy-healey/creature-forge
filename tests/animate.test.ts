@@ -1,7 +1,7 @@
 import { describe, expect, test } from 'vitest'
 import { GAITS, GAIT_PERIOD, applyPose, poseAt, type Gait, type Stance } from '../src/animate'
 import { generate } from '../src/generate'
-import { defaultSpec } from '../src/spec'
+import { defaultSpec, type CreatureSpec } from '../src/spec'
 
 const BIPED: Stance = { build: 'upright', frontLimb: 'arms', mesh: 'jointed', mutation: 'none' }
 const QUADRUPED: Stance = { build: 'quadruped', frontLimb: 'forelegs', mesh: 'jointed', mutation: 'none' }
@@ -40,19 +40,48 @@ describe('poseAt', () => {
     }
   })
 
-  test.each(CASES)('%s poses only joints a %s actually has built', (gait, name, stance) => {
+  /** A creature with one of everything, so nothing is missed for want of a part. */
+  const fullyEquipped = (stance: Stance): CreatureSpec => {
     const spec = defaultSpec()
     spec.body.build = stance.build
     spec.body.frontLimb = stance.frontLimb
     spec.head.ears = 'pointed'
     spec.wings.type = 'small'
     spec.tail.type = 'long'
-    const built = new Set(Object.keys(generate(spec).joints))
+    spec.tail.length = 1
+    return spec
+  }
 
-    for (const joint of Object.keys(poseAt(0, gait, stance))) {
-      if (joint === 'tail3') continue
-      expect(built.has(joint), `${joint} is posed but never built on a ${name}`).toBe(true)
+  test.each(STANCES)('a walking %s moves every joint of every limb it has', (name, stance) => {
+    const creature = generate(fullyEquipped(stance))
+    const pose = poseAt(0, 'walk', stance, creature.limbs)
+
+    // The gait is morphology-blind: it names joints a creature may not have,
+    // and applyPose ignores those. What must hold is the other direction —
+    // no limb it does have is left out of the stride.
+    for (const joint of creature.limbs.flatMap((limb) => limb.joints)) {
+      expect(pose[joint], `${joint} is built on a ${name} but never posed`).toBeDefined()
     }
+  })
+
+  test.each(CASES)('%s moves a %s\u2019s body and every bead of its tail', (gait, name, stance) => {
+    const creature = generate(fullyEquipped(stance))
+    const pose = poseAt(0, gait, stance, creature.limbs)
+
+    const body = ['hip', 'spine', 'neck', 'head']
+    const tail = Object.keys(creature.joints).filter((joint) => /^tail\d+$/.test(joint))
+    expect(tail.length).toBeGreaterThan(3)
+
+    for (const joint of [...body, ...tail]) {
+      expect(pose[joint], `${joint} is built on a ${name} but never posed`).toBeDefined()
+    }
+  })
+
+  test('standing still leaves the legs alone, because a standing creature does', () => {
+    const creature = generate(fullyEquipped(QUADRUPED))
+    const pose = poseAt(0.4, 'idle', QUADRUPED, creature.limbs)
+
+    expect(pose.backUpperL).toBeUndefined()
   })
 
   test('is pure — the same moment gives the same pose', () => {

@@ -738,14 +738,11 @@ export function generate(input: CreatureSpec): Creature {
   }
 
   // ─── settle on the ground ─────────────────────────────────────────────────
-  // A creature stands on its feet. Settling the whole bounding box instead
-  // lets a long tail or a low head take the weight and float the feet.
+  // The whole body, so nothing ever ends up below the floor. Keeping the feet
+  // on it is the tail's job: a long one is carried out behind rather than
+  // dragged, which is also how a long-tailed animal stands.
   root.updateMatrixWorld(true)
-  const standing = new THREE.Box3()
-  for (const name of Object.keys(joints)) {
-    if (name.includes('Foot')) standing.expandByObject(joints[name]!)
-  }
-  const bounds = standing.isEmpty() ? new THREE.Box3().setFromObject(root) : standing
+  const bounds = new THREE.Box3().setFromObject(root)
   if (Number.isFinite(bounds.min.y)) root.position.y = -bounds.min.y
   root.updateMatrixWorld(true)
 

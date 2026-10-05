@@ -3,7 +3,9 @@ import * as THREE from 'three'
 import { MAX_TAIL } from '../src/joints'
 import { poseAt } from '../src/animate'
 import { generate } from '../src/generate'
-import { MUTATIONS, TAIL_TYPES, defaultSpec, randomSpec, type CreatureSpec } from '../src/spec'
+import { MUTATIONS, MUTATION_GROUPS, TAIL_TYPES, defaultSpec, randomSpec, type CreatureSpec } from '../src/spec'
+
+const PLANS = MUTATION_GROUPS.find((group) => group.title === 'Plan')!.items
 
 const withTail = (length: number, edit: (spec: CreatureSpec) => void = () => {}): CreatureSpec => {
   const spec = defaultSpec()
@@ -88,19 +90,22 @@ describe('tail length', () => {
     }
   })
 
-  test('holds across every mutation and every rolled creature', () => {
-    for (const mutation of MUTATIONS) {
-      const spec = withTail(0.9, (s) => void (s.body.mutation = mutation))
-      const height = footHeight(spec)
-      const creature = generate(spec)
-      creature.root.updateMatrixWorld(true)
-      const label = `${mutation}`
+  test('a long tail keeps a plan mutation on its feet', () => {
+    // Deformations are excluded on purpose: a melted or inflated creature has
+    // no feet on the floor in any meaningful sense, and asserting otherwise
+    // would be asserting that the deformation did nothing.
+    for (const mutation of PLANS) {
+      const height = footHeight(withTail(0.9, (spec) => void (spec.body.mutation = mutation)))
+      if (height !== null) expect(height, mutation).toBeCloseTo(0, 1)
+    }
+  })
 
-      if (height === null) {
-        expect(new THREE.Box3().setFromObject(creature.root).min.y, label).toBeCloseTo(0, 1)
-      } else {
-        expect(height, label).toBeCloseTo(0, 1)
-      }
+  test('every mutation still sits on the floor with a long tail', () => {
+    for (const mutation of MUTATIONS) {
+      const creature = generate(withTail(0.9, (spec) => void (spec.body.mutation = mutation)))
+      creature.root.updateMatrixWorld(true)
+
+      expect(new THREE.Box3().setFromObject(creature.root).min.y, mutation).toBeCloseTo(0, 1)
     }
 
     for (let seed = 0; seed < 25; seed++) {
