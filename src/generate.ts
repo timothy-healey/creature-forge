@@ -52,6 +52,9 @@ const TAIL_SEGMENTS: Record<CreatureSpec['tail']['type'], number> = {
 
 const TAU = Math.PI * 2
 
+/** How far along the foot the ankle sits, from the back of the heel. */
+const ANKLE_ALONG_FOOT = 0.44
+
 /**
  * The first four limbs of a ring borrow the canonical joint names, so a gait
  * drives them without knowing it is looking at a radial creature. Opposite
@@ -379,10 +382,13 @@ export function generate(input: CreatureSpec): Creature {
     if (!options.bare) {
       if (options.ending === 'foot') {
         const height = footHeight * (options.footScale ?? 1)
+        // The ankle sits a little forward of the middle of the foot, with the
+        // heel projecting behind it. Hung from the heel instead, the creature
+        // stands on the backs of its feet and reads as leaning away from them.
         mesh(`${options.group}Foot${options.suffix}Mesh`, node, sided(parts.foot(forge, height)), {
           x: 0,
           y: -height * 0.5,
-          z: -dims.legThick * 0.45,
+          z: -dims.legThick * ANKLE_ALONG_FOOT * 2.2,
         })
       } else {
         mesh(`${options.group}Foot${options.suffix}Mesh`, node, sided(parts.hand(forge, options.thickness)))

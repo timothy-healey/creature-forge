@@ -3,7 +3,7 @@ import * as THREE from 'three'
 import { CORE_JOINTS } from '../src/joints'
 import { poseAt } from '../src/animate'
 import { generate } from '../src/generate'
-import { MESH_MODES, PAIR_COUNTS, defaultSpec, randomSpec, type CreatureSpec } from '../src/spec'
+import { LEG_TYPES, MESH_MODES, PAIR_COUNTS, defaultSpec, randomSpec, type CreatureSpec } from '../src/spec'
 
 const walker = (edit: (spec: CreatureSpec) => void = () => {}): CreatureSpec => {
   const spec = defaultSpec()
@@ -254,5 +254,59 @@ describe('a limb’s phase', () => {
     const apart = Math.abs(left.phase - right.phase)
 
     expect(Math.min(apart, Math.PI * 2 - apart)).toBeCloseTo(Math.PI, 5)
+  })
+})
+
+describe('standing over its feet', () => {
+  /** How far the footprint sits ahead of the body's axis, as a share of height. */
+  function lean(spec: CreatureSpec): number {
+    const creature = generate(spec)
+    creature.root.updateMatrixWorld(true)
+
+    const print = new THREE.Box3()
+    for (const name of Object.keys(creature.joints)) {
+      if (name.includes('Foot')) print.union(new THREE.Box3().expandByObject(creature.joints[name]!))
+    }
+    if (print.isEmpty()) return 0
+
+    const hip = creature.joints.hip!.getWorldPosition(new THREE.Vector3())
+    const height = new THREE.Box3().setFromObject(creature.root).getSize(new THREE.Vector3()).y
+    return ((print.min.z + print.max.z) / 2 - hip.z) / Math.max(0.01, height)
+  }
+
+  test.each(LEG_TYPES.filter((type) => type !== 'none'))(
+    'a %s creature plants its feet under itself, not ahead of itself',
+    (type) => {
+      // Hung from the heel the body stands on the backs of its feet, which
+      // reads as leaning away from them.
+      expect(Math.abs(lean(walker((spec) => void (spec.legs.type = type))))).toBeLessThan(0.02)
+    },
+  )
+
+  test('holds for an upright biped with arms, not only for a walker', () => {
+    expect(Math.abs(lean(defaultSpec()))).toBeLessThan(0.02)
+  })
+
+  test('holds however long the legs are', () => {
+    for (const length of [0, 0.5, 1]) {
+      expect(Math.abs(lean(walker((spec) => void (spec.legs.length = length)))), `legs ${length}`).toBeLessThan(0.03)
+    }
+  })
+
+  test('holds however thick they are, since the foot is sized from thickness', () => {
+    for (const thickness of [0, 0.5, 1]) {
+      expect(Math.abs(lean(walker((spec) => void (spec.legs.thickness = thickness)))), `${thickness}`).toBeLessThan(0.03)
+    }
+  })
+
+  test('the heel still projects behind the ankle, as a foot does', () => {
+    const creature = generate(walker())
+    creature.root.updateMatrixWorld(true)
+
+    const ankle = creature.joints.backFootL!.getWorldPosition(new THREE.Vector3())
+    const foot = new THREE.Box3().expandByObject(creature.joints.backFootL!)
+
+    expect(foot.min.z).toBeLessThan(ankle.z)
+    expect(foot.max.z).toBeGreaterThan(ankle.z)
   })
 })
