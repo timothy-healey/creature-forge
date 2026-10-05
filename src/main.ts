@@ -57,16 +57,40 @@ function show(next: CreatureSpec): void {
   syncShare({ spec: next, view })
 }
 
-mountUi(zones, spec, view, {
-  onSpecChange: show,
-  onGaitChange: (gait: Gait) => viewport.setGait(gait),
-  onViewChange: (next) => {
-    viewport.setView(next)
-    syncShare({ spec, view: next })
-  },
-  onFocus: (lens: Lens | null) => viewport.focus(lens),
+function mount(): void {
+  mountUi(zones, spec, view, {
+    onSpecChange: show,
+    onGaitChange: (gait: Gait) => viewport.setGait(gait),
+    onViewChange: (next) => {
+      viewport.setView(next)
+      syncShare({ spec, view: next })
+    },
+    onFocus: (lens: Lens | null) => viewport.focus(lens),
+  })
+}
+
+/**
+ * A code arriving in the address bar of a tab that is already open.
+ *
+ * Pasting a share link into the window you are already in changes the fragment
+ * without reloading the page, so without this the link would do nothing — and
+ * so would the back button. The controls hold references to `spec` and `view`,
+ * so the incoming values are written into those objects rather than replacing
+ * them, and the sheet is rebuilt to show what they now say.
+ */
+window.addEventListener('hashchange', () => {
+  const code = window.location.hash.slice(1)
+  if (code === encodeShare({ spec, view })) return
+
+  const next = decodeShare(code)
+  Object.assign(spec, next.spec)
+  Object.assign(view, next.view)
+  mount()
+  viewport.setView(view)
+  show(spec)
 })
 
+mount()
 viewport.setView(view)
 show(spec)
 
