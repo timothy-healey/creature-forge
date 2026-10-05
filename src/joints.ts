@@ -32,7 +32,10 @@ export const CORE_JOINTS = [
 export type CoreJoint = (typeof CORE_JOINTS)[number]
 
 /** Optional joints — a creature may have no tail, no ears and no wings. */
-export const TAIL_JOINTS = ['tail0', 'tail1', 'tail2', 'tail3'] as const
+export const MAX_TAIL = 8
+export const TAIL_JOINTS = [
+  'tail0', 'tail1', 'tail2', 'tail3', 'tail4', 'tail5', 'tail6', 'tail7',
+] as const
 export const EAR_JOINTS = ['earL', 'earR'] as const
 export const WING_JOINTS = ['wingL', 'wingR'] as const
 

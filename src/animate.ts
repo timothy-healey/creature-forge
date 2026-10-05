@@ -1,5 +1,5 @@
 import type * as THREE from 'three'
-import type { RestMap, RestPose } from './joints'
+import { MAX_TAIL, type RestMap, type RestPose } from './joints'
 import type { CreatureSpec } from './spec'
 
 /**
@@ -180,14 +180,20 @@ function stride(limb: Limb, kind: Limb['kind'], phase: number): Pose {
   return pose
 }
 
-/** The tail lags behind itself, each segment a little later than the last. */
+/**
+ * The tail lags behind itself, each segment a little later and a little wider
+ * than the one before. Written for every segment a tail can have rather than
+ * the few it usually does, since a pose naming a joint that is not there costs
+ * nothing and a tail that stops moving halfway down would be obvious.
+ */
 function tailSwish(phase: number, amount: number): Pose {
-  return {
-    tail0: { ry: Math.sin(phase) * amount },
-    tail1: { ry: Math.sin(phase - 0.6) * amount * 1.4 },
-    tail2: { ry: Math.sin(phase - 1.2) * amount * 1.8 },
-    tail3: { ry: Math.sin(phase - 1.8) * amount * 2.1 },
+  const pose: Pose = {}
+  for (let segment = 0; segment < MAX_TAIL; segment++) {
+    pose[`tail${segment}`] = {
+      ry: Math.sin(phase - segment * 0.55) * amount * (1 + segment * 0.34),
+    }
   }
+  return pose
 }
 
 const AT_REST: RestPose = { rx: 0, ry: 0, rz: 0, y: 0 }

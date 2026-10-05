@@ -135,7 +135,7 @@ export interface CreatureSpec {
    */
   limbs: { pairs: PairCount; segments: SegmentsPerLimb; back: number; front: number }
   legs: { type: LegType; length: number; thickness: number }
-  tail: { type: TailType }
+  tail: { type: TailType; length: number }
   back: { ridge: RidgeType }
   wings: { type: WingType }
   colors: { body: string; belly: string; accent: string; pattern: string; eye: string }
@@ -151,6 +151,7 @@ export type SliderPath =
   | 'head.length'
   | 'head.width'
   | 'neck.length'
+  | 'tail.length'
   | 'spine.arch'
   | 'spine.sway'
   | 'torso.height'
@@ -180,6 +181,7 @@ export const SLIDERS: readonly SliderDef[] = [
   { path: 'head.length', label: 'Length', group: 'Head' },
   { path: 'head.width', label: 'Width', group: 'Head' },
   { path: 'neck.length', label: 'Length', group: 'Neck' },
+  { path: 'tail.length', label: 'Tail', group: 'Tail' },
   { path: 'spine.arch', label: 'Sag → arch', group: 'Spine' },
   { path: 'spine.sway', label: 'Sway', group: 'Spine' },
   { path: 'torso.height', label: 'Height', group: 'Torso' },
@@ -217,7 +219,7 @@ export function defaultSpec(): CreatureSpec {
     arms: { length: 0.5, thickness: 0.45 },
     limbs: { pairs: 2, segments: 2, back: 0.04, front: 0.82 },
     legs: { type: 'digitigrade', length: 0.5, thickness: 0.5 },
-    tail: { type: 'long' },
+    tail: { type: 'long', length: 0.5 },
     back: { ridge: 'none' },
     wings: { type: 'none' },
     colors: { body: '#7b4fbf', belly: '#e8c45a', accent: '#e07a2f', pattern: '#2e1a4a', eye: '#1a1420' },
@@ -333,7 +335,7 @@ export function randomSpec(
       front: 0.55 + random() * 0.45,
     },
     legs: { type: pick(LEG_TYPES), length: biased(), thickness: biased() },
-    tail: { type: pick(TAIL_TYPES) },
+    tail: { type: pick(TAIL_TYPES), length: biased() },
     back: { ridge: pick(RIDGE_TYPES) },
     wings: { type: pick(WING_TYPES) },
     colors: rollPalette(random),

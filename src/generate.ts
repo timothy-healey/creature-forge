@@ -1,6 +1,6 @@
 import * as THREE from 'three'
 import { mirrorX, resolutionFor } from './geometry'
-import { type RestMap, type RestPose, rest } from './joints'
+import { MAX_TAIL, type RestMap, type RestPose, rest } from './joints'
 import * as parts from './parts'
 import { wrapPhase, type Limb } from './animate'
 import { paint } from './pattern'
@@ -630,9 +630,20 @@ export function generate(input: CreatureSpec): Creature {
   }
 
   // ─── tail, hung off the pelvis so the spine's pitch never swings it ───────
-  const segments = radial ? 0 : TAIL_SEGMENTS[spec.tail.type]
-  const segmentLength = (0.1 + torsoD * 0.42) * (segments > 1 ? 1 : 0.8)
-  const tailLift = { upright: -0.12, hunched: 0.3, quadruped: 0.16 }[spec.body.build]
+  /**
+   * Tail length is its own control, and it buys beads as well as reach: a tail
+   * twice as long made of the same three segments is three long sticks, not a
+   * tail. More of them means it can curve, and the swish has more to lag.
+   */
+  const base = radial ? 0 : TAIL_SEGMENTS[spec.tail.type]
+  const stretch = 0.35 + spec.tail.length ** 1.6 * 2.1
+  const segments =
+    base <= 1 ? base : Math.min(MAX_TAIL, Math.max(2, Math.round(base * (0.75 + spec.tail.length * 1.1))))
+  const reach = (0.1 + torsoD * 0.42) * base * stretch * (base > 1 ? 1 : 0.8)
+  const segmentLength = segments > 0 ? reach / segments : 0
+  // A long tail is carried out behind rather than dragged, which is both how a
+  // long-tailed animal stands and what keeps it off the floor.
+  const tailLift = { upright: -0.12, hunched: 0.3, quadruped: 0.16 }[spec.body.build] + spec.tail.length * 0.52
   let tailParent: THREE.Object3D = hip
   let tailAt: THREE.Vector3Like = { x: 0, y: torsoD * 0.12, z: -torsoD * 0.34 }
 
@@ -727,8 +738,14 @@ export function generate(input: CreatureSpec): Creature {
   }
 
   // ─── settle on the ground ─────────────────────────────────────────────────
+  // A creature stands on its feet. Settling the whole bounding box instead
+  // lets a long tail or a low head take the weight and float the feet.
   root.updateMatrixWorld(true)
-  const bounds = new THREE.Box3().setFromObject(root)
+  const standing = new THREE.Box3()
+  for (const name of Object.keys(joints)) {
+    if (name.includes('Foot')) standing.expandByObject(joints[name]!)
+  }
+  const bounds = standing.isEmpty() ? new THREE.Box3().setFromObject(root) : standing
   if (Number.isFinite(bounds.min.y)) root.position.y = -bounds.min.y
   root.updateMatrixWorld(true)
 
