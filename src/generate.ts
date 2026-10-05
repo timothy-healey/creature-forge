@@ -4,6 +4,7 @@ import { MAX_TAIL, type RestMap, type RestPose, rest } from './joints'
 import * as parts from './parts'
 import { wrapPhase, type Limb } from './animate'
 import { paint } from './pattern'
+import { bakeShading } from './shade'
 import { DEFORMATIONS, deform, explode, skew, type DeformPart, type Deformation } from './mutate'
 import { buildSkin, type SkinPiece } from './skin'
 import { type CreatureSpec, clampSpec } from './spec'
@@ -707,6 +708,18 @@ export function generate(input: CreatureSpec): Creature {
       strength: spec.skin.strength,
       size: Number.isFinite(standing.max.y) ? standing.getSize(new THREE.Vector3()).length() : 1,
       ground: Number.isFinite(standing.min.y) ? standing.min.y : 0,
+    })
+  }
+
+  // ─── bake the light in, after the markings and before any welding ────────
+  if (spec.bake.amount > 0.001) {
+    root.updateMatrixWorld(true)
+    const where: THREE.Vector3[] = []
+    for (const node of Object.values(joints)) where.push(node.getWorldPosition(new THREE.Vector3()))
+    bakeShading(deformable, {
+      amount: spec.bake.amount,
+      joints: where,
+      scale: Math.max(0.05, dims.torsoW),
     })
   }
 

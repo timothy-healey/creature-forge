@@ -243,7 +243,7 @@ function legend(): HTMLElement {
 function mountSpec(panel: HTMLElement, spec: CreatureSpec, changed: () => void, handlers: UiHandlers): void {
   panel.replaceChildren(
     tab('B1  SHAPE', ''),
-    lines(['detail.level', 'shape.edge', 'shape.section', 'shape.bulk'], spec, changed, handlers),
+    lines(['detail.level', 'shape.edge', 'shape.section', 'shape.bulk', 'bake.amount'], spec, changed, handlers),
     tab('B2  SPINE', ''),
     lines(['spine.arch', 'spine.sway'], spec, changed, handlers),
     tab('B3  FRAME', ''),

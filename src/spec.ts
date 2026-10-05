@@ -118,6 +118,8 @@ export interface CreatureSpec {
    * are what stop two creatures with different numbers being the same animal.
    */
   shape: { edge: number; section: number; bulk: number }
+  /** How hard light is baked into the palette before any lamp reaches it. */
+  bake: { amount: number }
   head: { type: HeadType; length: number; width: number; horns: HornCount; eyes: EyeCount; ears: EarType }
   neck: { length: number }
   /**
@@ -146,6 +148,7 @@ export type SliderPath =
   | 'shape.edge'
   | 'shape.section'
   | 'shape.bulk'
+  | 'bake.amount'
   | 'skin.scale'
   | 'skin.strength'
   | 'head.length'
@@ -176,6 +179,7 @@ export const SLIDERS: readonly SliderDef[] = [
   { path: 'shape.edge', label: 'Soft → sharp', group: 'Shape' },
   { path: 'shape.section', label: 'Deep → wide', group: 'Shape' },
   { path: 'shape.bulk', label: 'Mass fore/aft', group: 'Shape' },
+  { path: 'bake.amount', label: 'Baked light', group: 'Shape' },
   { path: 'skin.scale', label: 'Size', group: 'Markings' },
   { path: 'skin.strength', label: 'Strength', group: 'Markings' },
   { path: 'head.length', label: 'Length', group: 'Head' },
@@ -211,6 +215,7 @@ export function defaultSpec(): CreatureSpec {
     body: { build: 'upright', frontLimb: 'arms', mesh: 'jointed', mutation: 'none' },
     detail: { level: 0.3 },
     shape: { edge: 0.55, section: 0.45, bulk: 0.5 },
+    bake: { amount: 0.75 },
     skin: { pattern: 'none', scale: 0.4, strength: 0.85 },
     head: { type: 'snout', length: 0.5, width: 0.5, horns: 1, eyes: 2, ears: 'none' },
     neck: { length: 0.3 },
@@ -222,7 +227,7 @@ export function defaultSpec(): CreatureSpec {
     tail: { type: 'long', length: 0.5 },
     back: { ridge: 'none' },
     wings: { type: 'none' },
-    colors: { body: '#7b4fbf', belly: '#e8c45a', accent: '#e07a2f', pattern: '#2e1a4a', eye: '#1a1420' },
+    colors: { body: '#9a6ae0', belly: '#f0d072', accent: '#f08a3c', pattern: '#3b2160', eye: '#140f1c' },
   }
 }
 
@@ -315,6 +320,7 @@ export function randomSpec(
     // Rolled flat, not biased: the shape genes are the anti-sameness axis, and
     // their whole value is in the extremes a biased roll would never reach.
     shape: { edge: random(), section: random(), bulk: random() },
+    bake: { amount: defaultSpec().bake.amount },
     skin: { pattern: pick(PATTERNS), scale: 0.2 + random() * 0.6, strength: 0.6 + random() * 0.4 },
     head: {
       type: pick(HEAD_TYPES),
@@ -363,7 +369,9 @@ export function randomSpec(
 function rollPalette(random: () => number): CreatureSpec['colors'] {
   const hue = random() * 360
   const saturation = 0.42 + random() * 0.38
-  const lightness = 0.34 + random() * 0.2
+  // Read at a couple of hundred pixels against a dark ground, a creature needs
+  // to carry its own value: the old 0.34-0.54 range came out as a dark mass.
+  const lightness = 0.44 + random() * 0.2
 
   return {
     body: hslToHex(hue, saturation, lightness),

@@ -2,6 +2,7 @@ import * as THREE from 'three'
 import { OrbitControls } from 'three/examples/jsm/controls/OrbitControls.js'
 import { applyPose, poseAt, type Gait, type Stance } from './animate'
 import { withSmoothNormals } from './geometry'
+import { createBlobShadow, fitBlobShadow } from './shade'
 import type { Creature } from './generate'
 import { createInspector, type Lens } from './inspect'
 
@@ -334,6 +335,10 @@ export function createViewport(canvas: HTMLCanvasElement): Viewport {
   const ground = new THREE.Mesh(groundGeometry, groundMaterial)
   scene.add(ground)
 
+  // Stops the creature reading as floating, whatever shape it turned out.
+  const blob = createBlobShadow()
+  scene.add(blob)
+
   let creature: Creature | null = null
   let stance: Stance = { build: 'upright', frontLimb: 'arms', mesh: 'jointed', mutation: 'none' }
   let gait: Gait = 'idle'
@@ -368,6 +373,7 @@ export function createViewport(canvas: HTMLCanvasElement): Viewport {
     wardrobe.wore(view.render, flat)
     // A see-through or blacked-out creature reads better off the floor.
     ground.visible = SCENERY[view.background].ground !== null && view.render !== 'xray'
+    blob.visible = ground.visible && view.render !== 'silhouette'
   }
 
   /**
@@ -424,6 +430,8 @@ export function createViewport(canvas: HTMLCanvasElement): Viewport {
     inspector.show(next)
     dress(true)
 
+    next.root.updateMatrixWorld(true)
+    fitBlobShadow(blob, new THREE.Box3().setFromObject(next.root))
     reframe(next)
   }
 
@@ -541,6 +549,8 @@ export function createViewport(canvas: HTMLCanvasElement): Viewport {
       controls.dispose()
       grid?.dispose()
       sky?.geometry.dispose()
+      blob.geometry.dispose()
+      ;(blob.material as THREE.Material).dispose()
       creature?.dispose()
       skinMaterial?.dispose()
       groundGeometry.dispose()
