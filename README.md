@@ -1,12 +1,14 @@
 # Creature Forge
 
+**[Open it →](https://timothy-healey.github.io/creature-forge/)**
+
 A generative creature editor for the low-poly era — Spyro and Crash, flat shading
 and vertex colours, no textures anywhere. It runs entirely in the browser.
 
 Creature editors hide their machinery and show you a creature. This one draws the
 machinery **on** the creature, live, while it walks.
 
-![The sheet: a creature with its rig, spine chain and floor solve drawn over it, flanked by the structure rail and the measurement rail](docs/assets/screenshots/sheet.png)
+[![The sheet: a creature with its rig, spine chain and floor solve drawn over it, flanked by the structure rail and the measurement rail](docs/assets/screenshots/sheet.png)](https://timothy-healey.github.io/creature-forge/)
 
 Vite, TypeScript and Three.js. No UI framework — the interface is a drafting
 sheet, and the controls are built from the same tables that drive the generator,
@@ -87,8 +89,13 @@ Everything the sheet holds — the creature *and* how it is being looked at —
 packs into one bitstream and rides in the address bar:
 
 ```
-creature-forge/#2002MA107HQ5N5NACHJ3RS34CHJ68PK4B84A8S34K9NE1W6GEBR8MF1V45G183RW00PK87GN6
+timothy-healey.github.io/creature-forge/#2002MA107HQ5N5NACHJ3RS34CHJ68PK4B84A8S34K9NE1W6GEBR8MF1V45G183RW00PK87GN6
 ```
+
+That one is the default creature. [This is the exploded
+mutation](https://timothy-healey.github.io/creature-forge/#39D19JGW7JB0N5MMNSH4TB4KR6NSX88NB08A0Z34AEY83M75W3H2GNNZX343R41900PK87GNM),
+and [this one has its rig and floor solve
+drawn on it](https://timothy-healey.github.io/creature-forge/#2002MA107HQ5N5NACHJ3RS34CHJ68PK4B84A8S34K9NE1W6GEBR8MF1V45G183RW0PPK87GME).
 
 73 characters, Crockford base32 (no `I`, `L`, `O` or `U`, so it survives being
 read aloud), with a ten-bit checksum — a mistyped character gives you the default
