@@ -76,8 +76,8 @@ The era look is reproduced rather than filtered: a low-resolution drawing buffer
 upscaled with nearest-neighbour, vertex positions snapped to a coarse grid in
 clip space (PS1 hardware had no sub-pixel precision in its rasteriser, which is
 the single most recognisable tell of the period), flat shading, inverted-hull
-outlines, and light baked into vertex colours. **Pixels** and **wobble** are
-dials rather than constants, because the whole point of the era look is being
+outlines, and light baked into vertex colours. Resolution and steadiness are
+sliders rather than constants, because the whole point of the era look is being
 able to take it too far.
 
 One slider slides the same silhouette from **288 to 4,012 triangles** by changing

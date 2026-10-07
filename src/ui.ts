@@ -77,7 +77,7 @@ export function mountUi(zones: Zones, spec: CreatureSpec, view: ViewSettings, ha
   zones.zoneX.replaceChildren(...['1', '2', '3', '4', '5', '6'].map(text))
   mountModes(zones.modes, spec, view, handlers, changed, remount)
   mountRail(zones.rail, spec, changed, handlers)
-  mountSpec(zones.spec, spec, changed, handlers)
+  mountSpec(zones.spec, spec, view, changed, handlers)
 
   // New content, so the rails re-measure rather than keeping an old level.
   fitElement(zones.rail)
@@ -150,18 +150,6 @@ function mountModes(
         handlers.onViewChange(view)
       }),
     ),
-    group('OUTLINE', dial(view.outline, (value) => {
-      view.outline = value
-      handlers.onViewChange(view)
-    })),
-    group('PIXELS', dial(view.pixels, (value) => {
-      view.pixels = value
-      handlers.onViewChange(view)
-    })),
-    group('WOBBLE', dial(view.wobble, (value) => {
-      view.wobble = value
-      handlers.onViewChange(view)
-    })),
     span('spacer'),
     rollButton(() => remount(randomSpec(Math.random, spec.detail.level, spec.body.mesh, spec.body.mutation))),
   )
@@ -249,7 +237,13 @@ function legend(): HTMLElement {
 
 // ─── right rail: its own measurements ───────────────────────────────────────
 
-function mountSpec(panel: HTMLElement, spec: CreatureSpec, changed: () => void, handlers: UiHandlers): void {
+function mountSpec(
+  panel: HTMLElement,
+  spec: CreatureSpec,
+  view: ViewSettings,
+  changed: () => void,
+  handlers: UiHandlers,
+): void {
   panel.replaceChildren(
     tab('B1  SHAPE', ''),
     lines(['detail.level', 'shape.edge', 'shape.section', 'bake.amount'], spec, changed, handlers),
@@ -291,6 +285,8 @@ function mountSpec(panel: HTMLElement, spec: CreatureSpec, changed: () => void, 
     lines(['head.length', 'head.width', 'tail.length', 'skin.strength'], spec, changed, handlers),
     tab('B6  PALETTE', ''),
     palette(spec, changed),
+    tab('B7  ERA', ''),
+    eraLines(view, handlers),
     el('div', 'grow'),
     titleBlock(),
   )
@@ -307,6 +303,47 @@ function titleBlock(): HTMLElement {
   const block = el('div', 'title-block')
   block.append(totalsBlock(), identBlock())
   return block
+}
+
+/**
+ * How hard the era look is pushed. These were three unlabelled dials wedged
+ * into the mode strip, which cost it four hundred pixels it did not have and
+ * gave them no readout; as rail lines they read like every other number.
+ */
+const ERA: readonly { key: 'outline' | 'pixels' | 'wobble'; label: string }[] = [
+  { key: 'outline', label: 'Outline' },
+  { key: 'pixels', label: 'Resolution' },
+  { key: 'wobble', label: 'Steadiness' },
+]
+
+function eraLines(view: ViewSettings, handlers: UiHandlers): HTMLElement {
+  const pack = el('div', 'pack lines')
+  for (const { key, label } of ERA) {
+    const row = document.createElement('label')
+    row.className = 'line'
+    const name = el('span')
+    name.textContent = label
+
+    const input = document.createElement('input')
+    input.type = 'range'
+    input.min = '0'
+    input.max = '1'
+    input.step = '0.01'
+    input.value = String(view[key])
+
+    const readout = document.createElement('em')
+    readout.textContent = view[key].toFixed(2)
+
+    input.addEventListener('input', () => {
+      view[key] = Number(input.value)
+      readout.textContent = Number(input.value).toFixed(2)
+      handlers.onViewChange(view)
+    })
+
+    row.append(name, input, readout)
+    pack.append(row)
+  }
+  return pack
 }
 
 function palette(spec: CreatureSpec, changed: () => void): HTMLElement {
@@ -437,19 +474,6 @@ function group(label: string, content: HTMLElement): HTMLElement {
   const box = el('div', 'group')
   box.append(text(label), content)
   return box
-}
-
-/** A compact slider for the mode strip, where there is no room for a label row. */
-function dial(value: number, onInput: (value: number) => void): HTMLElement {
-  const input = document.createElement('input')
-  input.type = 'range'
-  input.min = '0'
-  input.max = '1'
-  input.step = '0.01'
-  input.value = String(value)
-  input.className = 'dial'
-  input.addEventListener('input', () => onInput(Number(input.value)))
-  return input
 }
 
 function tab(left: string, right: string): HTMLElement {

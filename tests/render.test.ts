@@ -6,6 +6,9 @@ import {
   SCENERY,
   createWardrobe,
   defaultView,
+  frameExtentDistance,
+  projectedExtent,
+  frameBoxDistance,
   frameDistance,
   HOUSE_VIEW,
   materialFor,
@@ -342,5 +345,69 @@ describe('the outline', () => {
         expect(length, `${mesh.name} vertex ${i}`).toBeCloseTo(1, 4)
       }
     }
+  })
+})
+
+describe('framing what the camera actually sees', () => {
+  const basis = (forward: THREE.Vector3) => {
+    const f = forward.clone().normalize()
+    const right = new THREE.Vector3().crossVectors(new THREE.Vector3(0, 1, 0), f).normalize()
+    return { right, up: new THREE.Vector3().crossVectors(f, right).normalize(), forward: f }
+  }
+
+  /** A body at the origin with a tail stuck out along −Z, as a creature has. */
+  const withTail = (): THREE.Vector3[] => [
+    new THREE.Vector3(-0.2, 0, -0.2), new THREE.Vector3(0.2, 1.4, 0.2),
+    new THREE.Vector3(0, 0.7, -1.8),
+  ]
+
+  test('measures the rectangle the lens has to cover, not the axis-aligned box', () => {
+    // Looking straight down −Z, a tail pointing away adds depth and no width.
+    const square = projectedExtent(withTail(), basis(new THREE.Vector3(0, 0, 1)))
+
+    expect(square.halfRight).toBeCloseTo(0.2, 5)
+    expect(square.halfUp).toBeCloseTo(0.7, 5)
+    expect(square.depth).toBeCloseTo(2, 5)
+  })
+
+  test('aims at the middle of the silhouette, where a box centre does not', () => {
+    // This is the defect itself: at a three-quarter view the tail throws the
+    // box's centre sideways, so the creature sits off to one side of the frame.
+    const view = basis(new THREE.Vector3(0.6, 0.35, 0.8))
+    const points = withTail()
+    const across = points.map((point) => point.dot(view.right))
+    const middle = (Math.min(...across) + Math.max(...across)) / 2
+
+    const extent = projectedExtent(points, view)
+    const boxCentre = new THREE.Box3().setFromPoints(points).getCenter(new THREE.Vector3())
+
+    expect(extent.centre.dot(view.right)).toBeCloseTo(middle, 5)
+    expect(boxCentre.dot(view.right)).not.toBeCloseTo(middle, 2)
+  })
+
+  test('a tail swung across the view widens the frame; a tail pointing away does not', () => {
+    const away = projectedExtent(withTail(), basis(new THREE.Vector3(0, 0, 1)))
+    const across = projectedExtent(withTail(), basis(new THREE.Vector3(1, 0, 0)))
+
+    expect(across.halfRight).toBeGreaterThan(away.halfRight * 3)
+  })
+
+  test('asks for less distance than the axis-aligned box does for the same shape', () => {
+    const view = basis(new THREE.Vector3(0.6, 0.35, 0.8))
+    const points = withTail()
+    const box = new THREE.Box3().setFromPoints(points)
+
+    const tight = frameExtentDistance(projectedExtent(points, view), 50, 1.2)
+    const loose = frameBoxDistance(box.getSize(new THREE.Vector3()), view, 50, 1.2)
+
+    expect(tight).toBeLessThan(loose)
+  })
+
+  test('survives a degenerate viewport and a single point', () => {
+    const one = projectedExtent([new THREE.Vector3(1, 2, 3)], basis(new THREE.Vector3(0, 0, 1)))
+
+    expect(one.centre.toArray()).toEqual([1, 2, 3])
+    expect(Number.isFinite(frameExtentDistance(one, 50, Number.NaN))).toBe(true)
+    expect(Number.isFinite(frameExtentDistance(one, 50, 0))).toBe(true)
   })
 })

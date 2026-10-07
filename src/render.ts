@@ -151,6 +151,101 @@ export function frameBoxDistance(
 }
 
 /**
+ * Every surface vertex of a creature, in world space.
+ *
+ * The outline copies are skipped: they are the same shape pushed outward along
+ * its normals, so including them would frame the creature as slightly larger
+ * than it is, by however hard the outline dial is turned.
+ */
+function surfacePoints(root: THREE.Object3D): THREE.Vector3[] {
+  const points: THREE.Vector3[] = []
+  root.traverse((node) => {
+    const mesh = node as THREE.Mesh
+    if (!mesh.isMesh || !mesh.geometry || mesh.name === 'outline') return
+    const position = mesh.geometry.getAttribute('position') as THREE.BufferAttribute | undefined
+    if (!position) return
+    for (let i = 0; i < position.count; i++) {
+      points.push(new THREE.Vector3().fromBufferAttribute(position, i).applyMatrix4(mesh.matrixWorld))
+    }
+  })
+  return points
+}
+
+/**
+ * How much of the frame a shape really occupies, measured on the camera's own
+ * axes rather than on the world's.
+ *
+ * An axis-aligned box is a poor stand-in for a creature. At a three-quarter
+ * view a tail that sticks straight back lands near the edge of the box, so the
+ * box is far larger than the silhouette and its centre is dragged toward the
+ * tail — the creature ends up small and off to one side of a frame it never
+ * fills. Projecting the points onto the view's own axes gives the rectangle the
+ * lens actually has to cover, and the middle of that rectangle is where to look.
+ */
+export interface Extent {
+  /** Half the width to cover, across the camera's right axis. */
+  halfRight: number
+  /** Half the height to cover, along the camera's up axis. */
+  halfUp: number
+  /** How far the shape runs along the view direction. */
+  depth: number
+  /** The middle of that rectangle, in world space. */
+  centre: THREE.Vector3
+}
+
+export function projectedExtent(
+  points: readonly THREE.Vector3[],
+  basis: { right: THREE.Vector3; up: THREE.Vector3; forward: THREE.Vector3 },
+): Extent {
+  let leastRight = Infinity
+  let mostRight = -Infinity
+  let leastUp = Infinity
+  let mostUp = -Infinity
+  let leastForward = Infinity
+  let mostForward = -Infinity
+
+  for (const point of points) {
+    const right = point.dot(basis.right)
+    const up = point.dot(basis.up)
+    const forward = point.dot(basis.forward)
+    if (right < leastRight) leastRight = right
+    if (right > mostRight) mostRight = right
+    if (up < leastUp) leastUp = up
+    if (up > mostUp) mostUp = up
+    if (forward < leastForward) leastForward = forward
+    if (forward > mostForward) mostForward = forward
+  }
+
+  if (!Number.isFinite(leastRight)) {
+    return { halfRight: 0, halfUp: 0, depth: 0, centre: new THREE.Vector3() }
+  }
+
+  // The basis is orthonormal, so the three midpoints rebuild the world point.
+  const centre = new THREE.Vector3()
+    .addScaledVector(basis.right, (leastRight + mostRight) / 2)
+    .addScaledVector(basis.up, (leastUp + mostUp) / 2)
+    .addScaledVector(basis.forward, (leastForward + mostForward) / 2)
+
+  return {
+    halfRight: (mostRight - leastRight) / 2,
+    halfUp: (mostUp - leastUp) / 2,
+    depth: mostForward - leastForward,
+    centre,
+  }
+}
+
+/** How far back the camera sits for that rectangle to fill the frame. */
+export function frameExtentDistance(extent: Extent, fov: number, aspect: number, margin = 1.06): number {
+  const shape = Number.isFinite(aspect) && aspect > 0 ? aspect : 1
+  const vertical = (fov * Math.PI) / 180
+  const verticalTan = Math.tan(vertical / 2)
+  const horizontalTan = verticalTan * shape
+
+  const needed = Math.max(extent.halfUp / verticalTan, extent.halfRight / horizontalTan)
+  return needed * margin + extent.depth / 2
+}
+
+/**
  * Where the camera stands when nobody has moved it: a three-quarter view from
  * a little above the creature's own eye level, looking down.
  */
@@ -427,29 +522,25 @@ export function createViewport(canvas: HTMLCanvasElement): Viewport {
    */
   function reframe(next: Creature): void {
     next.root.updateMatrixWorld(true)
-    const bounds = new THREE.Box3().setFromObject(next.root)
-    if (bounds.isEmpty()) return
+    const points = surfacePoints(next.root)
+    if (points.length === 0) return
 
-    const centre = bounds.getCenter(new THREE.Vector3())
-    controls.target.copy(centre)
-
-    // The direction the camera will be looking from, so the box can be measured
-    // against the frame it will actually land in.
+    // A provisional aim, only to settle which way the camera will be looking.
+    // The real target comes from the silhouette that direction produces.
+    const rough = new THREE.Box3().setFromPoints(points).getCenter(new THREE.Vector3())
     const forward = orbited
-      ? camera.position.clone().sub(centre).normalize()
-      : orbitPoint(centre, 1, HOUSE_VIEW.azimuth, HOUSE_VIEW.elevation).sub(centre).normalize()
+      ? camera.position.clone().sub(rough).normalize()
+      : orbitPoint(rough, 1, HOUSE_VIEW.azimuth, HOUSE_VIEW.elevation).sub(rough).normalize()
     if (forward.lengthSq() < 1e-8) forward.set(0.5, 0.35, 0.8).normalize()
 
     const right = new THREE.Vector3().crossVectors(new THREE.Vector3(0, 1, 0), forward).normalize()
     if (right.lengthSq() < 1e-8) right.set(1, 0, 0)
     const up = new THREE.Vector3().crossVectors(forward, right).normalize()
 
-    const needed = frameBoxDistance(
-      bounds.getSize(new THREE.Vector3()),
-      { right, up, forward },
-      camera.fov,
-      camera.aspect,
-    )
+    const extent = projectedExtent(points, { right, up, forward })
+    controls.target.copy(extent.centre)
+
+    const needed = frameExtentDistance(extent, camera.fov, camera.aspect)
     const wanted = THREE.MathUtils.clamp(needed, controls.minDistance, controls.maxDistance)
 
     // Nobody has orbited: take the house angle outright rather than inheriting
